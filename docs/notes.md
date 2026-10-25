@@ -245,8 +245,9 @@ against video length, dark frames, frozen frames, brightness jumps at cuts.
 
 ## Ideas not done yet
 
-- Footage without motion data that was never stabilized (phone clips, goggle recordings): `vis_motion.py` on
-  a raw picture would see the shake as motion; it needs smoothing, or stabilization from the picture first.
+- Stabilization from the picture, for footage without motion data that was never stabilized (phone clips,
+  goggle recordings): `vis_motion.py` reads its rotation already (the shake too, which edit.py low-passes);
+  smoothing that rotation and turning each frame back would stabilize it. Checkable on the gyro clips.
 - An absolute horizon for motion from the picture (sky and ground, or a regression of the camera angle on the
   CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.
 - Tracks without a constant tempo: a neural beat tracker (Beat This!), drum stems for cleaner accents.

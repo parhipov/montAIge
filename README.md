@@ -172,7 +172,8 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 
 ## Not implemented yet
 
-- Footage without motion data that was never stabilized (phone clips, goggle recordings): skipped for now.
+- Stabilization from the picture: footage without motion data that was never stabilized (phone clips, goggle
+  recordings) is skipped. Its motion can be read from the picture already; the picture itself would stay shaky.
 - Tracks without a constant tempo.
 
 ## Credits
