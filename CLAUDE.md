@@ -45,7 +45,7 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   catalogue BPM as `bpm`. Kevin MacLeod, CC BY 4.0: credit when publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` fills itself from Hugging Face; `faces/` SFace from the
-  OpenCV Model Zoo; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
+  OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
 - The owner watches as it goes: keep steps short, say what is running, take comments in between.
 - A new job in a new session: every request re-reads the whole conversation, and a job done late in a long
   session cost 3.5 times as many tokens as it would on its own.
@@ -100,6 +100,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
   in loud phrases), `--want KIND` (e.g. `ascent`), `--arcs N` (whole climbs and descents).
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
+- Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
+  words, `beauty.py`): a beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
+- Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty). Landings
+  are marked and kept for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`; a piece longer than its phrase plays faster, up to 1.7x.
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z` (kept in the EDL for `final.py`).
@@ -114,6 +118,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
 - `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg`, `final.py`, `dji_join.py`,
   `djimeta.py`.
+- `edl_edit.py`: a comment on one scene of a finished edit: `--replace K` (the same music, the rest frame for
+  frame), `--end-from K` (the ending takes over). The music is never cut: that moves every later scene.
+- `vis_motion.py`: camera motion from the picture of a clip stabilized elsewhere (a `_stabilized` export
+  without its original: montage.py takes it in, scales it down with `proxy.py`, finals cut it directly).
 
 ## After a job
 

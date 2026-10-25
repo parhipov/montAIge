@@ -52,6 +52,15 @@ ACC_REACH = 6           # frames: sync tolerance while choosing shots (snapping 
 TRICK_DEG = 250.0       # rotation within 1 s that counts as a manoeuvre
 DIVE_DEG = 45.0         # camera this far below the horizon counts as a dive
 UP = np.array([0.0, 0.0, -1.0])     # world up in DJI's fused frame (image-down agrees 96-99 %)
+# on the ground, for motion from the picture: mean flow under this (px per frame pair, analyze.py, 160 px wide).
+# GH010401 against its gyro: on the ground median 0.07 (people walking by: p90 0.5), in the air p1 0.11, p5 0.16;
+# at 0.1 nothing of the flight is taken for the ground and 41 % of the ground is missed, at 0.2 2 % and 28 %
+STILL_FLOW = 0.12
+# landings: LANDING_S before a stretch on the ground (Flight._usable). Every Dagestan clip ended in a slow
+# approach, a flop at the touchdown (40-190 deg/s, read as a roll) and the ground; the owner called the 8 s before a
+# touchdown among people "a dull landing, not the point", and "a landing can be an ending": a window pays W_LANDING x
+# its landing share anywhere but in the last scene
+LANDING_S, W_LANDING = 10.0, 6.0
 SKILL_PARTS = dict(parallax=0.45, lean=0.25, rotation=0.30)       # action: loud music
 CINE_PARTS = dict(parallax=0.55, lean=0.30, smooth=0.15)          # cinematic: quiet music
 PULLUP_DEG, PASS_RANK = 50.0, 0.985    # camera tilts up this much in 1 s; parallax percentile of a close pass
@@ -132,6 +141,12 @@ LOOK_SIGMA = 22.0
 # 3 roof scenes of 1: the old man is a person, and people (W_PEOPLE 4 x 1-1.6) outweighed it
 W_THEME, THEME_HIT, THEME_LOW, THEME_FULL = 8.0, 0.4, 0.35, 0.55
 THEME_MIN_S = 2.0       # a shot this short does not use up a theme's scenes (a 1.2 s pickup took the lawn mower)
+# beautiful views (--beauty W, off by default; beauty.py in the job's own words): per frame the view is the mean of
+# the aesthetic rank (LAION, across all footage) and the probability of the job's beautiful views. A window pays
+# W_BEAUTY x its view everywhere; in a people edit a beautiful view excuses a shot with nobody in it (W_EMPTY x
+# (1 - view)); the cinematic piloting score (quiet music) takes CINE_VIEW of the view
+W_BEAUTY, CINE_VIEW = 0.0, 0.3
+CHAPTERS = []           # --chapters N,N,...: scenes per recording day in date order, instead of chapters() sharing them
 THEMES = []             # [(text, scenes allowed)]
 # scene: cuts inside it jump 1..12 s forward; continuity of rotation across them
 GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.0
@@ -360,6 +375,32 @@ def load_people(stab, proxy_dir, n):
     return out + bump
 
 
+def load_beauty(stab, n):
+    """Aesthetic score and probability of the job's beautiful views (beauty.py) on the full frame grid, or None."""
+    p = os.path.splitext(stab)[0] + '_beauty.npz'
+    if not os.path.exists(p):
+        return None
+    z = np.load(p)
+    i = np.arange(n)
+    return np.interp(i, z['frame'], z['aes']), np.interp(i, z['frame'], z['scenic'])
+
+
+def set_beauty(flights):
+    """f.view per frame (see W_BEAUTY) and its share of the cinematic score; flights without beauty.py get none."""
+    seen = [f for f in flights if getattr(f, 'beauty', None) is not None]
+    if not seen:
+        print('  note: --beauty without beauty.py output (job file: beauty = [...])')
+        return
+    pool = np.sort(np.concatenate([f.beauty[0][f.usable] for f in seen]))
+    words = any(f.beauty[1].max() > 0 for f in seen)
+    for f in seen:
+        rank = prank(f.beauty[0], pool)
+        f.view = 0.5 * rank + 0.5 * f.beauty[1] if words else rank
+        f.cvw = csum(f.view)
+        f.cine = (1 - CINE_VIEW) * f.cine + CINE_VIEW * f.view
+        f.cc = csum(f.cine)
+
+
 def load_look(stab, proxy_dir):
     """(step, thumbnails every `step` frames) from looks.py, or None."""
     if not proxy_dir:
@@ -446,8 +487,9 @@ def prank(x, ref):
 
 
 class Flight:
-    def __init__(self, idx, src, stab, q, fps, flow, proxy, look=None):
+    def __init__(self, idx, src, stab, q, fps, flow, proxy, look=None, motion='gyro'):
         self.idx, self.src, self.stab, self.fps, self.proxy, self.look = idx, src, stab, fps, proxy, look
+        self.motion = motion                                     # 'gyro', or 'picture' (vis_motion.py)
         self.name = os.path.splitext(os.path.basename(src))[0]
         self.n = n = len(q)
         self.rates = rates = rates_from_quats(q, fps)
@@ -499,11 +541,20 @@ class Flight:
                 u[max(c - int(1.5 * fps), 0):] = False
             else:
                 u[max(c - int(1.0 * fps), 0):c + int(1.5 * fps)] = False
-        # on the ground: no vibration and no rotation for 2 s
-        hf = self.rates - uniform_filter1d(self.rates, int(fps / 2), axis=0)
-        vib = np.sqrt(uniform_filter1d((hf ** 2).sum(1), int(2 * fps)))
-        still = uniform_filter1d(((vib < 1.5) & (self.vis < 3.0)).astype(float), int(2 * fps)) > 0.9
+        # on the ground: no vibration and no rotation for 2 s; motion from a stabilized picture has no vibration
+        # left, so there it is a picture standing still (STILL_FLOW)
+        if self.motion == 'picture' and self.flow is not None:
+            calm = self.flow['flow'] < STILL_FLOW
+        else:
+            hf = self.rates - uniform_filter1d(self.rates, int(fps / 2), axis=0)
+            vib = np.sqrt(uniform_filter1d((hf ** 2).sum(1), int(2 * fps)))
+            calm = (vib < 1.5) & (self.vis < 3.0)
+        still = uniform_filter1d(calm.astype(float), int(2 * fps)) > 0.9
         u &= ~still
+        # landings: the approach and the touchdown before each stretch on the ground, marked (W_LANDING), not cut
+        self.landing = np.zeros(n, bool)
+        for a in np.flatnonzero(np.diff(still.astype(int)) == 1) + 1:
+            self.landing[max(a - int(LANDING_S * fps), 0):a] = True
         if self.flow is not None:                                # blown-out / black picture
             br = self.flow['bright']
             u &= (br > 25) & (br < 235)
@@ -550,7 +601,9 @@ class Flight:
             for seg in (np.split(low, np.flatnonzero(np.diff(low) > 1) + 1) if low.size else []):
                 if seg.size >= DESCENT_S * self.fps and par[seg].mean() < DESCENT_FAR:
                     ev.append((int(seg[seg.size // 2]), 1.2, 'descent'))
-        ev = sorted(e for e in ev if self.usable[e[0]])
+        tilt_ok = getattr(self, 'tilt_ok', None)                 # motion from the picture: see vis_motion.TRUST_INL
+        ev = sorted(e for e in ev if self.usable[e[0]] and
+                    (tilt_ok is None or e[2] not in ('dive', 'pull-up', 'descent') or tilt_ok[e[0]]))
         self.tricks = np.array([e[0] for e in ev], int)
         self.trick_deg = np.array([e[1] * TRICK_DEG for e in ev])
         self.trick_kind = [e[2] for e in ev]
@@ -579,16 +632,29 @@ def creation_time(path):
         return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc)
 
 
-def load_motion(src, cache_dir):
-    """Per-frame camera orientation: Gyroflow's export if the cache has one, else DJI `djmd`."""
+def stabilized_before(path):
+    """A clip montage.py's scan took in as already stabilized: a `_stabilized` export without its original."""
+    return '_stabilized' in os.path.basename(path).lower()
+
+
+def load_motion(src, cache_dir, render=None):
+    """Per-frame camera orientation and where it comes from: Gyroflow's export if the cache has one ('gyro');
+    for a clip stabilized before (a `_stabilized` export without its original, see montage.py scan) the
+    orientation vis_motion.py found in its picture ('picture'); else DJI `djmd` ('gyro')."""
     stem = os.path.splitext(os.path.basename(src))[0]
     gj = os.path.join(cache_dir, stem + '_gyroflow_camera.json')
     if os.path.exists(gj):
         with open(gj, encoding='utf-8') as fh:
             d = json.load(fh)
         q = np.array([r['org_quat'] for r in d], float)
-        return q / np.linalg.norm(q, axis=1, keepdims=True), frame_count(src)[1]
-    return load_telemetry(src, cache_dir)
+        return q / np.linalg.norm(q, axis=1, keepdims=True), frame_count(src)[1], 'gyro'
+    if stabilized_before(src):
+        vp = os.path.splitext(render or '')[0] + '_vis.npz'
+        if not os.path.exists(vp):
+            raise SystemExit(f'stabilized before, no motion from its picture yet: run vis_motion.py on {render}')
+        z = np.load(vp)
+        return z['q'].astype(np.float64), float(z['fps']), 'picture'
+    return (*load_telemetry(src, cache_dir), 'gyro')
 
 
 def find_flights_list(originals, cache_dir, proxy_dir):
@@ -600,7 +666,7 @@ def find_flights_list(originals, cache_dir, proxy_dir):
             print(f'  skip {stem}: no Gyroflow render + analysis in {proxy_dir}')
             continue
         try:
-            q, fps = load_motion(src, cache_dir)
+            q, fps, motion = load_motion(src, cache_dir, render)
         except SystemExit as e:
             print(f'  skip {stem}: {e}')
             continue
@@ -612,7 +678,13 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         q = q[off:off + n]
         if len(q) < n:
             q = np.vstack([q, np.repeat(q[-1:], n - len(q), axis=0)])
-        fl = Flight(len(out), src, render, q, fps, load_flow(render, proxy_dir, n), render, load_look(render, proxy_dir))
+        fl = Flight(len(out), src, render, q, fps, load_flow(render, proxy_dir, n), render, load_look(render, proxy_dir),
+                    motion)
+        if motion == 'picture':                                  # tilt manoeuvres only where the rotation fits
+            import vis_motion
+            z = np.load(os.path.splitext(render)[0] + '_vis.npz')
+            tr = vis_motion.trusted(z['inl'], fps)[off:off + n]
+            fl.tilt_ok = np.concatenate([tr, np.ones(n - len(tr), bool)]) if len(tr) < n else tr
         pe = load_people(render, proxy_dir, n)
         fl.people = pe if pe is not None else np.zeros(n)
         fl.cp = csum(fl.people)
@@ -620,6 +692,7 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         fl.csb = csum(load_subject(render, proxy_dir, n))
         fl.cimp = csum(load_stand_ins(render, proxy_dir, n))
         fl.can = csum(load_animals(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n) > 0)
+        fl.beauty = load_beauty(render, n)
         fl.offset, fl.when = off, creation_time(src)
         fl.day = fl.when.date().isoformat()
         out.append(fl)
@@ -1034,7 +1107,7 @@ def shot_quality(sh, f, s, n, pools):
 
 
 def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(), hero_used=(), opening=False,
-               fly=False, must=None, theme=None):
+               fly=False, must=None, theme=None, ending=False):
     """Score of starting this shot at every frame of flight f (-inf where impossible)."""
     N = f.n
     out = np.full(N, -np.inf)
@@ -1061,11 +1134,14 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
     sync /= sh['nbeats']
     off = np.maximum(f.ca[s + n] - f.ca[s] - on_beat, 0) / sh['nbeats']
     sc = (W_SKILL * qs - W_INT * np.abs(qw - sh['q_music']) + W_SYNC * sync - W_OFF * off - W_NEAR * near)
+    vw = (f.cvw[s + n] - f.cvw[s]) / n if W_BEAUTY and hasattr(f, 'cvw') else np.zeros(s.size)
+    sc += W_BEAUTY * vw
     if fly:
         sc += W_FLY * qs
     elif W_PEOPLE and hasattr(f, 'cp'):
         pv = (f.cp[s + n] - f.cp[s]) / n
-        sc += W_PEOPLE * pv - W_EMPTY * (pv < EMPTY_BELOW)       # flights to nowhere belong to the flying scenes
+        # flights to nowhere belong to the flying scenes, unless the view itself is the point (--beauty)
+        sc += W_PEOPLE * pv - W_EMPTY * (pv < EMPTY_BELOW) * (1 - vw)
         if FOCUS[0]:
             sc -= W_AWAY * ((f.csb[s + n] - f.csb[s]) / n < FOCUS_PRESENT)
             sc -= W_IMPOSTOR * (f.cimp[s + n] - f.cimp[s]) / n
@@ -1073,6 +1149,10 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
             sc -= W_PILOT_OVER * (f.cpa[s + n] - f.cpa[s]) / n
     if opening:
         sc += W_OPEN * qs
+    if not ending and getattr(f, 'landing', None) is not None:  # a landing is for the ending only
+        cl = f.cland if hasattr(f, 'cland') else csum(f.landing.astype(np.float64))
+        f.cland = cl
+        sc -= W_LANDING * (cl[s + n] - cl[s]) / n
     if moves:
         sig = window_moves(f, s, n)
         pen = np.zeros(s.size)
@@ -1164,7 +1244,7 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
     nodes = [shot_nodes(x, f, n, pools, used, scene['hero'] and k == 0, scene['slow_hero'], rng, look,
                         moves, hero_used, scene['idx'] <= 1, scene.get('fly', False),
                         mu[1:] if mu and mu[0] == f.idx and (mu[3] is None or k == len(shots) - 1) else None,
-                        theme)
+                        theme, scene.get('last', False))
              for k, (x, n) in enumerate(zip(shots, ns))]
     N = f.n
     idx = np.arange(N)
@@ -1196,13 +1276,17 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
 
 def chapters(scenes, flights, good=0.75):
     """Recording days in date order; each gets consecutive scenes in proportion to its good flying
-    (seconds of footage whose piloting score, cinematic or action, is above `good`)."""
+    (seconds of footage whose piloting score, cinematic or action, is above `good`) and, with --beauty, its
+    beautiful views (f.view above `good`): a day of calm flights over the most beautiful place (Dagestan, an old
+    stone village on a mountain: 94-98 % scenic) had 71 good seconds of flying against 143 of a beach day."""
     days = sorted({f.day for f in flights})
     w = []
     for d in days:
         fs = [f for f in flights if f.day == d]
-        w.append(sum(float(((np.maximum(f.skill, f.cine) > good) & f.usable).sum()) / f.fps for f in fs))
+        w.append(sum(float(((np.maximum(np.maximum(f.skill, f.cine), getattr(f, 'view', 0.0) if W_BEAUTY else 0.0)
+                             > good) & f.usable).sum()) / f.fps for f in fs))
     w = np.array(w)
+    wall = dict(zip(days, w))
     keep = w >= 15.0                                             # a day needs ~15 s of good flying
     if not keep.any():                                           # little footage: the best day it is
         keep = w == w.max()
@@ -1215,6 +1299,13 @@ def chapters(scenes, flights, good=0.75):
         cnt[np.argmax(cnt)] -= 1
     while cnt.sum() < n:
         cnt[np.argmax(share - cnt)] += 1
+    if CHAPTERS:                                                 # the editor's own split (--chapters)
+        every = sorted({f.day for f in flights})
+        if len(CHAPTERS) != len(every) or sum(CHAPTERS) != n:
+            raise SystemExit(f'--chapters {",".join(map(str, CHAPTERS))}: {len(every)} days ({", ".join(every)}) '
+                             f'and {n} scenes to share')
+        days, cnt = [d for d, c in zip(every, CHAPTERS) if c], np.array([c for c in CHAPTERS if c])
+        w = np.array([wall[d] for d in days])
     out, k = [], 0
     for d, c in zip(days, cnt):
         for _ in range(c):
@@ -1239,6 +1330,11 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         f, last = flights[fi], end_at is not None
         free = [len(scenes) - 1] if last else [i for i, sc in enumerate(scenes)     # a flying scene may host a flight
                                                if not (sc['hero'] or sc.get('must'))]
+        # chapters by day: a moment goes to a scene of its own day (assign looks for footage of the scene's day
+        # and the days next to it only: a 9 Sep moment placed in a 5 Sep scene left that scene with nothing)
+        own = [i for i in free if scenes[i].get('day') in (None, getattr(f, 'day', None))]
+        if own and not first:
+            free = own
         best = None
         for i in free:
             for whole in (False, True):
@@ -1268,6 +1364,8 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         if best[2] is not None:
             scenes[best[1]]['shots'] = [best[2]]
         scenes[best[1]]['must'] = (fi, lo, hi, end_at)
+        if scenes[best[1]].get('day') and getattr(f, 'day', None):
+            scenes[best[1]]['day'] = f.day                       # an opening or an ending of another day
         sp = f' at {best[2]["speed"]:.2f}x' if best[2] is not None and best[2]['speed'] > BASE_SPEED[0] + 0.01 else ''
         print(f'  {what} -> scene {best[1]}{" (the end)" if last else " (the opening)" if first else ""}'
               f'{", the phrase as one shot" + sp if best[2] is not None else ""}')
@@ -1340,47 +1438,54 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
             raise SystemExit(f'ran out of footage at scene {i}: {usable:.0f} s usable for a {m["duration"]:.0f} s edit '
                              '(shots keep ~1 s apart and away from each other): a shorter --target, or more footage')
         score, f, starts, ns = best
-        sc['flight'], sc['score'] = f.idx, float(score)
-        for k, (x, a, n) in enumerate(zip(sc['shots'], starts, ns)):
-            used[f.idx].append((a, a + n))
-            sv = window_moves(f, np.array([a]), n)[0]
-            if hasattr(f, 'cp'):
-                x['people'] = float((f.cp[a + n] - f.cp[a]) / n)
-                x['pilot_alone'] = float((f.cpa[a + n] - f.cpa[a]) / n)
-                x['subject'] = float((f.csb[a + n] - f.csb[a]) / n)
-                x['stand_in'] = float((f.cimp[a + n] - f.cimp[a]) / n)
-                x['animal'] = float((f.can[a + n] - f.can[a]) / n)
-                PILOT_USED[0] += x['pilot_alone'] * (x['t1'] - x['t0'])
-            x.update(flight=f.idx, src_frame=int(a), src_frames=int(n),
-                     skill=float(shot_quality(x, f, np.array([a]), n, pools)[0]),
-                     move=MOVES[int(np.argmax(sv[:-1])) if sv[:-1].max() > 0.35 else len(MOVES) - 1])
-            moves.append((sv, x['t0']))
-            if sc.get('fly'):
-                kinds = [kind for c, kind in zip(f.tricks, f.trick_kind) if a <= c < a + n]
-                if kinds:
-                    x['fly_kind'] = kinds[0]
-                    hero_used.update(kinds)
-            if sc['hero'] and k == 0:
-                want = a + hero_offset(x, f)
-                near_ = [(abs(c - want), kind) for c, kind in zip(f.tricks, f.trick_kind)]
-                if near_:
-                    x['hero_kind'] = min(near_)[1]
-                    hero_used.add(x['hero_kind'])
-            lk = shot_look(f, a, n)
-            if lk is not None:
-                seen.append(lk)
-        if getattr(f, 'theme_p', None) is not None:
-            hit = np.zeros(len(THEMES), bool)
-            for x in sc['shots']:
-                if x['t1'] - x['t0'] < THEME_MIN_S:                  # a glimpse (a pickup) does not show it
-                    continue
-                p = window_theme(f, x['src_frame'], x['src_frames'])
-                if p.max() >= THEME_HIT:
-                    x['theme'] = THEMES[int(np.argmax(p))][0]
-                hit |= p >= THEME_HIT
-            for k in np.flatnonzero(hit):
-                shown[k] += 1
+        sc['score'] = float(score)
+        take(sc, f, starts, ns, pools, used, seen, moves, hero_used, shown)
     return scenes
+
+
+def take(sc, f, starts, ns, pools, used, seen, moves, hero_used, shown):
+    """Scene sc becomes these windows of flight f: its shots get their footage and what is in it, and what the
+    next scenes are scored against (used footage, looks, movements, manoeuvres, themes shown) is updated."""
+    sc['flight'] = f.idx
+    for k, (x, a, n) in enumerate(zip(sc['shots'], starts, ns)):
+        used[f.idx].append((a, a + n))
+        sv = window_moves(f, np.array([a]), n)[0]
+        if hasattr(f, 'cp'):
+            x['people'] = float((f.cp[a + n] - f.cp[a]) / n)
+            x['pilot_alone'] = float((f.cpa[a + n] - f.cpa[a]) / n)
+            x['subject'] = float((f.csb[a + n] - f.csb[a]) / n)
+            x['stand_in'] = float((f.cimp[a + n] - f.cimp[a]) / n)
+            x['animal'] = float((f.can[a + n] - f.can[a]) / n)
+            PILOT_USED[0] += x['pilot_alone'] * (x['t1'] - x['t0'])
+        x.update(flight=f.idx, src_frame=int(a), src_frames=int(n),
+                 skill=float(shot_quality(x, f, np.array([a]), n, pools)[0]),
+                 move=MOVES[int(np.argmax(sv[:-1])) if sv[:-1].max() > 0.35 else len(MOVES) - 1])
+        moves.append((sv, x['t0']))
+        if sc.get('fly'):
+            kinds = [kind for c, kind in zip(f.tricks, f.trick_kind) if a <= c < a + n]
+            if kinds:
+                x['fly_kind'] = kinds[0]
+                hero_used.update(kinds)
+        if sc['hero'] and k == 0:
+            want = a + hero_offset(x, f)
+            near_ = [(abs(c - want), kind) for c, kind in zip(f.tricks, f.trick_kind)]
+            if near_:
+                x['hero_kind'] = min(near_)[1]
+                hero_used.add(x['hero_kind'])
+        lk = shot_look(f, a, n)
+        if lk is not None:
+            seen.append(lk)
+    if getattr(f, 'theme_p', None) is not None:
+        hit = np.zeros(len(THEMES), bool)
+        for x in sc['shots']:
+            if x['t1'] - x['t0'] < THEME_MIN_S:                  # a glimpse (a pickup) does not show it
+                continue
+            p = window_theme(f, x['src_frame'], x['src_frames'])
+            if p.max() >= THEME_HIT:
+                x['theme'] = THEMES[int(np.argmax(p))][0]
+            hit |= p >= THEME_HIT
+        for k in np.flatnonzero(hit):
+            shown[k] += 1
 
 
 # ================================================================ speed ramps
@@ -1774,6 +1879,12 @@ def make_parser():
     ap.add_argument('--zoom', type=float, default=1.0,
                     help='cut the centre 1/ZOOM of the picture (kept in the EDL for final.py): 1.16 hides the edges of '
                          'a lens guard that the stabilized frame still shows')
+    ap.add_argument('--beauty', type=float, default=0.0,
+                    help='weight of beautiful views (beauty.py, in the words of the job); 4 = as much as piloting. A '
+                         'beautiful view also excuses a shot with nobody in it in a people edit')
+    ap.add_argument('--chapters', default=None,
+                    help='scenes per recording day in date order, e.g. 3,2,4,2 (0 leaves a day out); default: in '
+                         'proportion to good flying (and beautiful views with --beauty)')
     ap.add_argument('--theme', action='append', default=[],
                     help='"TEXT[:N]", what the edit shows in words (repeatable): at most N scenes of it (default 1), '
                          'e.g. "a man on a ladder repairing a roof" when one activity fills the footage')
@@ -1786,16 +1897,17 @@ def make_parser():
     return ap
 
 
-def main():
-    a = make_parser().parse_args()
+def apply_options(a):
+    """The weights and switches of the command line, set where the scoring reads them; -> the noise generator."""
+    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY
     if a.lively:
         PATTERNS.update(PATTERNS_LIVELY)
     if a.pace:
         BASE_SPEED.update(BASE_SPEED_PACE)
-    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH
     if a.animals is not None:
         ANIMAL_WORTH = a.animals
     WANT[:] = a.want
+    THEMES.clear()
     for t in a.theme:
         text, _, cap = t.rpartition(':')
         THEMES.append((text, int(cap)) if text and cap.isdigit() else (t, 1))
@@ -1806,10 +1918,25 @@ def main():
     FOCUS[0] = a.focus and bool(a.subject)
     PEER_TAGS[:] = ([t for t in (a.peers or '').split(',') if t and t != a.subject] +
                     ([a.subject + '_not'] if a.subject else []))
-    rng = np.random.default_rng(a.seed) if a.seed is not None else None
-    global W_PEOPLE, MAX_FLY
-    W_PEOPLE, MAX_FLY = a.people, a.fly
+    W_PEOPLE, MAX_FLY, W_BEAUTY = a.people, a.fly, a.beauty
+    CHAPTERS[:] = [int(v) for v in a.chapters.split(',')] if a.chapters else []
     END_SET[0] = a.end is not None
+    return np.random.default_rng(a.seed) if a.seed is not None else None
+
+
+def prepare_flights(flights, a):
+    """What the options ask of the footage beyond find_flights: climbs, beautiful views, themes."""
+    if 'ascent' in a.want or a.arcs:
+        add_ascents(flights, a.clip_cache)
+    if W_BEAUTY:
+        set_beauty(flights)
+    if THEMES:
+        load_themes(flights, a.clip_cache)
+
+
+def main():
+    a = make_parser().parse_args()
+    rng = apply_options(a)
     out = os.path.abspath(a.out)
     base = os.path.splitext(out)[0]
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -1821,8 +1948,7 @@ def main():
             flights = find_flights_list([x.strip() for x in fh if x.strip()], cache, a.proxy_dir)
     else:
         flights = find_flights(a.footage, cache, a.proxy_dir)
-    if 'ascent' in a.want or a.arcs:
-        add_ascents(flights, a.clip_cache)
+    prepare_flights(flights, a)
     for f in flights:
         kinds = ', '.join(f'{f.trick_kind.count(k)} {k}' for k in EVENT_KINDS
                           if f.trick_kind.count(k))
@@ -1845,6 +1971,7 @@ def main():
     print(f'  {os.path.basename(music_path)}: {m["duration"]:.1f}s, {m["bpm"]:.2f} BPM, {m["beats"].size} beats, '
           f'downbeat phase {m["downbeat"]}')
     scenes = plan_scenes(m, rng)
+    scenes[-1]['last'] = True
     if all(hasattr(f, 'day') for f in flights):
         w, cnt = chapters(scenes, flights)
         print(f'  chapters (good seconds -> scenes): {", ".join(f"{d}: {w[d]:.0f}s -> {cnt[d]}" for d in cnt)}')
@@ -1892,8 +2019,6 @@ def main():
     if a.avoid:
         print(f'  footage taken by {len(a.avoid)} earlier edits: '
               f'{sum(b - a_ for v in avoid.values() for a_, b in v) / flights[0].fps:.0f}s')
-    if THEMES:
-        load_themes(flights, a.clip_cache)
     scenes = assign(scenes, flights, m, rng, musts, avoid)
     if a.no_ramps or not a.ramps:
         for x in (x for s in scenes for x in s['shots']):

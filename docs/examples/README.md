@@ -13,3 +13,4 @@ the owner's comments, and what the job taught (now in `scripts/` and [../notes.m
 | [koprino](koprino.md) | 5 GoPro clips, a family walk with a pram and a cat | a family film, 45 s |
 | [tennis](tennis.md) | 12 DJI O4 Pro clips, D-Log M, kids' tennis practice indoors | a series: the coach, the game, one film per child |
 | [village](village.md) | 11 DJI O4 Pro clips, one plot in a village | one place, three ideas; climbs; 4K |
+| [dagestan](dagestan.md) | 14 GoPro HERO8 clips, 31 GB, a holiday; 5 without gyro | a holiday report, 1:31; motion from the picture, beauty |

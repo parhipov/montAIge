@@ -51,6 +51,29 @@ renders (same frame count as the original), telemetry from the original.
   among the alternatives, flying close over a roof and a chimney against the sky got in. The camera angle does
   not separate them (−8..+6° on most climbs). The way back to the ground closes an arc; "up 24 s, far 0.13"
   ranks how high it went. ([village](examples/village.md))
+- **Motion from the picture** (`vis_motion.py`), for clips stabilized elsewhere whose gyro is gone (an owner's
+  Gyroflow export without its original): corners tracked between consecutive frames of the proxy (Lucas-Kanade,
+  both ways), the camera rotation fitted by RANSAC on pairs of bearings, chained into an orientation per frame
+  that edit.py takes like telemetry. Against the gyro of a GoPro clip rendered by our Gyroflow (`stab_quat`, the
+  smoothed path the picture shows): correlation 0.99 / 0.95 / 0.99 on tilt / pan / roll, scale 1.03 / 0.98 /
+  1.01, error 4-6°/s. Three things made it work: the field of view per axis (GoPro SuperView keeps a 4:3 view in
+  16:9: one focal length read tilt at 0.40 of the truth, pan at 0.78); starting the corners where the last
+  rotation takes them; and, past 4° a frame, tracking against the previous frame turned by that rotation (a roll
+  at 700°/s turns the patches ~25° a frame, and the tracker matches shifted patches only: 14 tracks of ~270
+  before, the rate within 3 % after). An essential matrix between consecutive frames is useless (baselines too
+  short: thousands of °/s off). The rotation-only fit takes a climb near the ground for a tilt (a take-off read
+  +5°/s for a true -10..-20), so the elevation is pulled to a level camera at -4° with a 5 s time constant: a 1 s
+  change of elevation correlates 0.65 with the gyro (0.57 at 15 s), flips and dives stay. The field of view is
+  found in the picture: with a wrong focal length the edges of a wide frame move unlike its centre and no
+  rotation fits, so the grid point whose rotations fit pairs moving 8 px or more best wins (96 x 66° against
+  105 x 67° from the gyro; Gyroflow's dynamic zoom moves the focal length ±15 % within a clip anyway). The
+  owner's exports came out 103-108 x 71-76°. On the ground the picture stands still: mean flow under 0.12 px
+  (160 px wide) for 2 s, which took nothing of a flight for the ground on the gyro clip. Low over a slope the
+  ground fills the frame and its parallax reads as a tilt: on a gyro clip flown low over dry hills, pan and roll
+  still correlated 0.93 and 0.96, tilt 0.55, and 0.19-0.32 where under 0.6 of the tracks fit one rotation (1 s
+  mean), 0.65-0.93 above. So under 0.6 the elevation is pulled level within 1 s and no dive, pull-up or descent
+  counts there: elevation then correlated 0.68 with the gyro (0.48 before), its 1 s change 0.70 (0.36).
+  Trusted: 57-89 % of the owner's five exports, least where they flew low over hillsides.
 - **Movement signature** per frame: dive, pull-up, pitch-down, turn left, turn right, roll, close pass,
   cruise. A shot that moves like one placed within ~25 s of music pays `W_MOVE` (cosine above 0.6).
 
@@ -67,6 +90,17 @@ renders (same frame count as the original), telemetry from the original.
   (17 fps, the download to host memory); 640 px proxies decode at ~780 fps. Three Gyroflow renders in parallel
   give ~46 fps in total from 4K HEVC 10-bit. When re-encoding with PyAV, set `frame.time_base` with
   `frame.pts`, or the muxer fails with EINVAL.
+
+## Beautiful views
+
+An option (`--beauty W`), because beauty is the job's own: mountains for one, a beach for another. `beauty.py`
+scores every CLIP sample (0.5 s) twice: the LAION aesthetic predictor (a linear head on CLIP ViT-B/32 trained on
+people's 1-10 ratings of photos: a good picture whatever it shows) and the probability of the job's beautiful
+views in words against what else drone footage shows. A window's view is the mean of the aesthetic rank and
+that probability; it pays `W_BEAUTY` everywhere, takes 0.3 of the cinematic piloting score, and in a people edit
+excuses a shot with nobody in it. On a Dagestan trip the turquoise river in a canyon topped the check sheet; a
+giant seaplane on a beach (a landmark the owner would want) was among the worst by the aesthetic predictor:
+a landmark comes in as a theme or a moment, not as beauty.
 
 ## Piloting score
 
@@ -93,6 +127,18 @@ which owners call beautiful: those come in as editor's pieces.
   so the fade-out follows it.
 - **Flying scenes** (`--fly N`): one whole phrase around a manoeuvre, people ignored; elsewhere in a people
   edit a shot with nobody in it pays `W_EMPTY`.
+- **Chapters** by recording day share the scenes by good flying and, with `--beauty`, beautiful views (a calm
+  day over the most beautiful place had 71 good seconds of flying, 285 with the views); `--chapters 3,2,4,2`
+  sets them by hand. An editor's moment goes to a scene of its own day: one of 9 Sep placed in a 5 Sep scene
+  left that scene with no footage. ([dagestan](examples/dagestan.md))
+- **Landings** (the 10 s before a stretch on the ground) are marked, not cut: every clip of one trip ended in a
+  slow approach and a flop that read as a roll ("a dull landing"), but "a landing can be an ending", so a
+  window pays `W_LANDING` anywhere but in the last scene.
+- **Changing a finished edit** (`edl_edit.py`): planning again after a small comment moves other scenes (the
+  track is shortened along another path, the scenes per day shared anew), and cutting a scene's phrase out of
+  the track moves every later scene off its beats. So the music stays: `--replace K` finds scene K again
+  against the rest as it stands; `--end-from K` lets the ending take over from scene K (earlier in its clip,
+  at 1x, to the same last frame).
 - **Distance in time:** footage close to another scene's shot pays `W_NEAR` (2, over 20 s); the parts of a
   split recording count as one flight (an edit once opened with two passes over the same warm-up 17 s apart).
 - **Themes** (`--theme "TEXT[:N]"`): a scene shows a theme when one of its shots averages 0.4 or more; once
@@ -199,7 +245,10 @@ against video length, dark frames, frozen frames, brightness jumps at cuts.
 
 ## Ideas not done yet
 
-- Footage without motion data: edit from detection alone instead of skipping it.
+- Footage without motion data that was never stabilized (phone clips, goggle recordings): `vis_motion.py` on
+  a raw picture would see the shake as motion; it needs smoothing, or stabilization from the picture first.
+- An absolute horizon for motion from the picture (sky and ground, or a regression of the camera angle on the
+  CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.
 - Tracks without a constant tempo: a neural beat tracker (Beat This!), drum stems for cleaner accents.
 - Slow motion in finals: frame interpolation, or 100 fps sources.
 - Pick the best of N seeds by skill, sync and variety.

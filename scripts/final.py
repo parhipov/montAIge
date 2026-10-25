@@ -3,7 +3,8 @@
     python final.py EDIT_edl.json OUT.mp4 [--width 1920 --height 1080 --fps 50] [--captions]
 
 1. every shot (plus 0.6 s each side) becomes a Gyroflow trim range of its original clip,
-   overlapping ranges are merged, and gf_render.py renders them at the output size;
+   overlapping ranges are merged, and gf_render.py renders them at the output size; a clip stabilized
+   before (a `_stabilized` export without its original) is cut from its own file, scaled;
 2. each piece is aligned to the full-clip small render the EDL frames refer to, by
    comparing frames (Gyroflow's trim start is a few frames off the millisecond value);
 3. the pieces are cut to the music, with a short dissolve where the recording day changes
@@ -114,14 +115,17 @@ class GpuGrade:
 class Reader:
     """Sequential frame access to one piece; frames are asked for in increasing order.
 
-    `crop` = (x0, y0) of the W x H window cut out of the (larger) piece."""
-    def __init__(self, path, W, H, crop=(0, 0)):
+    `crop` = (x0, y0) of the W x H window cut out of the (larger) piece; `scale` = (Wp, Hp) to scale every
+    frame to first and `first` = the first frame wanted, for a clip stabilized before (its own file is the piece)."""
+    def __init__(self, path, W, H, crop=(0, 0), scale=None, first=0):
         self.c = av.open(path)
         self.st = self.c.streams.video[0]
         self.st.thread_type = 'AUTO'
         self.fps = float(self.st.average_rate)
+        if first > 2:
+            self.c.seek(int((first - 2) / self.fps / self.st.time_base), stream=self.st, backward=True)
         self.it = self.c.decode(self.st)
-        self.cur, self.img, self.W, self.H, self.crop = -1, None, W, H, crop
+        self.cur, self.img, self.W, self.H, self.crop, self.scale = -1, None, W, H, crop, scale
 
     def get(self, i):
         while self.cur < i:
@@ -133,8 +137,9 @@ class Reader:
             if self.cur >= i or self.img is None:
                 x0, y0 = self.crop
                 deep = '10' in fr.format.name or fr.format.name.startswith('p01')
-                img = fr.reformat(format='rgb48le' if deep else 'rgb24', src_colorspace='itu709', dst_colorspace='itu709',
-                                  src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
+                sw, sh = self.scale or (None, None)
+                img = fr.reformat(width=sw, height=sh, format='rgb48le' if deep else 'rgb24', src_colorspace='itu709',
+                                  dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
                 self.img = np.ascontiguousarray(img[y0:y0 + self.H, x0:x0 + self.W])
         return self.img
 
@@ -201,7 +206,7 @@ def main():
         lo = x['anchors'][0] - MARGIN_S * f['fps'] - (DISSOLVE_S * f['fps'])
         hi = x['anchors'][-1] + MARGIN_S * f['fps'] + (DISSOLVE_S * f['fps'])
         by.setdefault(x['flight'], []).append([max(lo, 0.0), hi, [k]])
-    ranges, owner = {}, {}
+    ranges, owner, owner_lo = {}, {}, {}
     for fi, rr in by.items():
         rr.sort()
         merged = []
@@ -214,6 +219,7 @@ def main():
         f = flights[fi]
         ranges[f['original']] = [[round(lo / f['fps'] * 1000.0), round(hi / f['fps'] * 1000.0)] for lo, hi, _ in merged]
         for j, (lo, hi, ks) in enumerate(merged):
+            owner_lo[(fi, j)] = lo
             for k in ks:
                 owner[k] = (fi, j, lo)
     rj = os.path.join(pieces_dir, 'ranges.json')
@@ -221,6 +227,8 @@ def main():
         json.dump(ranges, fh, ensure_ascii=False, indent=1)
     stem = lambda fi: os.path.splitext(os.path.basename(flights[fi]['original']))[0]
     def piece(fi, j):
+        if bf.stabilized_before(flights[fi]['original']):       # stabilized before: cut from the clip itself
+            return flights[fi]['original']
         # Gyroflow numbers the trims (-001, -002 ...) only when a clip has more than one
         if len(ranges[flights[fi]['original']]) == 1:
             return os.path.join(pieces_dir, f'{stem(fi)}_stabilized.mp4')
@@ -230,7 +238,7 @@ def main():
     sizes = {False: piece_size(a.width, a.height, 0.0, 0.0, zoom),
              True: piece_size(a.width, a.height, a.crop_bottom, a.crop_top, zoom)}
     for dji in (True, False):
-        todo = {c: r for c, r in ranges.items() if is_dji(c) == dji and
+        todo = {c: r for c, r in ranges.items() if is_dji(c) == dji and not bf.stabilized_before(c) and
                 not all(os.path.exists(piece(fi, j)) for fi in flights if flights[fi]['original'] == c for j in range(len(r)))}
         if not todo:
             continue
@@ -249,6 +257,9 @@ def main():
     starts = {}
     for k, (fi, j, lo) in sorted(owner.items()):
         if (fi, j) in starts:
+            continue
+        if bf.stabilized_before(flights[fi]['original']):       # the proxy is this file, frame for frame
+            starts[(fi, j)] = 0
             continue
         asked = int(round(round(lo / flights[fi]['fps'] * 1000.0) / 1000.0 * flights[fi]['fps']))
         k0, cor = align(piece(fi, j), flights[fi]['render'], asked)
@@ -290,7 +301,11 @@ def main():
         x = shots[k]
         fi, j, _ = owner[k]
         if (fi, j) not in readers:
-            readers[(fi, j)] = Reader(piece(fi, j), W, H, sizes[is_dji(flights[fi]['original'])][2])
+            Wp, Hp, crop = sizes[is_dji(flights[fi]['original'])]
+            if bf.stabilized_before(flights[fi]['original']):
+                readers[(fi, j)] = Reader(piece(fi, j), W, H, crop, scale=(Wp, Hp), first=int(owner_lo[(fi, j)]))
+            else:
+                readers[(fi, j)] = Reader(piece(fi, j), W, H, crop)
         u = np.array(x['anchor_t'])
         v = np.array(x['anchors'])
         sp = (v[-1] - v[0]) / max(u[-1] - u[0], 1e-9)

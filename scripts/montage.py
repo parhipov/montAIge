@@ -17,6 +17,8 @@ paths in it); the job's name is its folder (or `name = ...`):
     people = true                            # poses, pilot, close passes (default true)
     objects = false                          # animals, vehicles (objects.py)
     places = true                            # CLIP frame embeddings for find:TEXT pieces (default true)
+    beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
+    hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
     args = ["--people", "4"]                 # edit.py options of every edit (before the edit's own)
 
     [[edit]]
@@ -30,12 +32,15 @@ paths in it); the job's name is its folder (or `name = ...`):
 
 Steps:
   scan      the clips: originals only (not renders, not goggle recordings, not the _parts of a joined
-            recording). Split DJI recordings are listed and the job stops: they are joined (dji_join.py)
+            recording), and `_stabilized` clips whose original is not there. Split DJI recordings are listed and the job stops: they are joined (dji_join.py)
             only with --join, after the owner of the footage said yes. -> out/<name>/originals.txt
   render    whole-clip Gyroflow renders 640 px wide, several at once (gf_render.py); GoPro motion through
-            Gyroflow's export (gf_motion.py)
+            Gyroflow's export (gf_motion.py). A `_stabilized` clip without its original (stabilized before,
+            no motion data left) is only scaled down (proxy.py); its motion comes from the picture
+            (vis_motion.py in `features`, `hfov = 92` in the job file: the field of view of its picture)
   features  per render: image motion and looks (analyze.py), people (people.py detect, pilotclip, passes),
-            objects (objects.py), places (places.py embed)
+            objects (objects.py), places (places.py embed),
+            beautiful views (beauty.py, with `beauty`)
   edits     edit.py per [[edit]], previews 640 px 25 fps; redone when the job file is newer than the EDL.
             "auto" length: 25 s + 0.25 x seconds the person is in view at 2 % of the frame or more + 0.5 x
             seconds at 6 % or more, 25..75 s (the tennis kids: 29..65 s)
@@ -97,25 +102,41 @@ def scan(job, out, join):
         for r in roots:
             if run([os.path.join(HERE, 'dji_join.py'), r]):
                 raise SystemExit('joining failed')
-    clips = []
+    files = []
     for p in job['footage']:
-        files = [p] if os.path.isfile(p) else [os.path.join(d, n) for d, _, ns in os.walk(p) for n in ns]
-        for f in files:
-            n = os.path.basename(f)
-            if (not n.lower().endswith('.mp4') or n.startswith('_') or '_stabilized' in n
-                    or n.upper().startswith('DJIG')):                # goggle recordings carry no gyro
-                continue
-            clips.append(f)
+        files += [p] if os.path.isfile(p) else [os.path.join(d, n) for d, _, ns in os.walk(p) for n in ns]
+    files = [f for f in files if f.lower().endswith('.mp4') and not os.path.basename(f).startswith(('_', '.'))]
+    stems = {os.path.splitext(os.path.basename(f))[0].lower() for f in files}
+    clips, elsewhere = [], []
+    for f in files:
+        n = os.path.basename(f)
+        if n.upper().startswith('DJIG'):                         # goggle recordings carry no gyro
+            continue
+        if '_stabilized' in n.lower():
+            # an export of an original that is here is the owner's old export (exports.py); without its original
+            # it is the footage itself, already stabilized: picture as it is, motion from it (vis_motion.py)
+            if n.lower().split('_stabilized')[0] not in stems:
+                elsewhere.append(f)
+            continue
+        clips.append(f)
     keep = []
     for c in sorted(set(clips)):
         if has_track(c, b'djmd') or has_track(c, b'gpmd'):
             keep.append(c)
         else:
             print(f'  skip {os.path.basename(c)}: no motion data (DJI djmd / GoPro gpmd)')
+    for c in sorted(set(elsewhere)):
+        print(f'  {os.path.basename(c)}: stabilized before, without its original: motion from the picture')
+    keep += sorted(set(elsewhere))
     with open(os.path.join(out, 'originals.txt'), 'w', encoding='utf-8') as fh:
         fh.write('\n'.join(keep) + '\n')
     print(f'scan: {len(keep)} clips -> {os.path.join(out, "originals.txt")}')
     return keep
+
+
+def stabilized_before(path):
+    """A clip the scan took in as already stabilized (a `_stabilized` export without its original)."""
+    return '_stabilized' in os.path.basename(path).lower()
 
 
 def originals(out):
@@ -130,7 +151,7 @@ def render(job, out, proxy, cache):
     if not gyroflow or not os.path.isfile(gyroflow):
         raise SystemExit('Gyroflow not found: set GYROFLOW or `gyroflow` in the job file')
     os.environ['GYROFLOW'] = gyroflow
-    gopro = [c for c in clips if not has_track(c, b'djmd')]
+    gopro = [c for c in clips if not stabilized_before(c) and not has_track(c, b'djmd')]
     if gopro:
         lst = os.path.join(out, 'gopro.txt')
         open(lst, 'w', encoding='utf-8').write('\n'.join(gopro) + '\n')
@@ -143,25 +164,27 @@ def render(job, out, proxy, cache):
         with av.open(c) as ct:
             cc = ct.streams.video[0].codec_context
             h = int(round(PROXY_W * cc.height / cc.width / 2)) * 2
-        by_size.setdefault(h, []).append(c)
+        # Gyroflow renders the originals; a clip stabilized before is only scaled down (proxy.py)
+        by_size.setdefault((h, 'proxy' if stabilized_before(c) else 'render'), []).append(c)
     n = int(job.get('renders', 3))
-    for h, cl in by_size.items():
+    for (h, tool), cl in by_size.items():
         procs = []
         for k in range(n):
             part = cl[k::n]
             if not part:
                 continue
-            lst = os.path.join(out, f'render_{h}_{k}.txt')
+            lst = os.path.join(out, f'{tool}_{h}_{k}.txt')
             open(lst, 'w', encoding='utf-8').write('\n'.join(part) + '\n')
-            log = open(os.path.join(out, f'render_{h}_{k}.log'), 'a', encoding='utf-8')
-            procs.append(subprocess.Popen([sys.executable, os.path.join(HERE, 'gf_render.py'), proxy, '--list', lst,
-                                           '--width', str(PROXY_W), '--height', str(h), '--bitrate', '3M'],
+            log = open(os.path.join(out, f'{tool}_{h}_{k}.log'), 'a', encoding='utf-8')
+            cmd = [sys.executable, os.path.join(HERE, 'gf_render.py' if tool == 'render' else 'proxy.py'), proxy,
+                   '--list', lst, '--width', str(PROXY_W), '--height', str(h)]
+            procs.append(subprocess.Popen(cmd + (['--bitrate', '3M'] if tool == 'render' else []),
                                           stdout=log, stderr=subprocess.STDOUT))
         t0 = time.time()
-        print(f'render: {len(cl)} clips at {PROXY_W}x{h}, {len(procs)} at once', flush=True)
+        print(f'{tool}: {len(cl)} clips at {PROXY_W}x{h}, {len(procs)} at once', flush=True)
         for p in procs:
             p.wait()
-        print(f'render: done in {time.time() - t0:.0f}s')
+        print(f'{tool}: done in {time.time() - t0:.0f}s')
 
 
 # ------------------------------------------------------------------------------------------- features
@@ -174,6 +197,9 @@ def features(job, out, proxy):
     yolo = os.path.join(MODELS, 'yolo')
     log = os.path.join(out, 'features.log')
     run([os.path.join(HERE, 'analyze.py')] + renders, log)
+    before = [r for c, r in zip(originals(out), renders) if stabilized_before(c)]
+    if before:                                                   # their motion, from the picture
+        run([os.path.join(HERE, 'vis_motion.py')] + before + (['--hfov', job['hfov']] if job.get('hfov') else []), log)
     if job.get('people', True):
         run([os.path.join(HERE, 'people.py'), 'detect'] + renders +
             ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--objects', os.path.join(yolo, 'yolov8s.pt')], log)
@@ -185,6 +211,9 @@ def features(job, out, proxy):
         run([os.path.join(HERE, 'objects.py'), '--weights', os.path.join(yolo, 'yolov8s.pt')] + renders, log)
     if job.get('places', True):
         run([os.path.join(HERE, 'places.py'), 'embed'] + renders + ['--clip-cache', os.path.join(MODELS, 'clip')], log)
+    if job.get('beauty'):                                        # beautiful views in the job's words (edit.py --beauty)
+        run([os.path.join(HERE, 'beauty.py')] + renders + [x for t in job['beauty'] for x in ('--text', t)] +
+            ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'beauty_check.jpg')], log)
     print(f'features: done (log {log}); check {os.path.join(out, "pilot_check.jpg")} and passes_check.jpg once')
 
 

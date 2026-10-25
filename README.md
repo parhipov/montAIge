@@ -13,10 +13,12 @@ on your GPU analyse the footage and give the model numbers and short text summar
   <tr>
     <td><img src="docs/crinoline_dreams.jpg" width="420" alt="Crinoline Dreams"></td>
     <td><img src="docs/carefree.jpg" width="420" alt="Carefree"></td>
+    <td><img src="docs/dagestan.jpg" width="420" alt="Living Voyage"></td>
   </tr>
   <tr>
     <td align="center"><i>Crinoline Dreams</i>, 54 s, 5 GoPro clips</td>
     <td align="center"><i>Carefree</i>, 45 s, 5 GoPro clips</td>
+    <td align="center"><i>Living Voyage</i>, 1:31, 14 GoPro clips, 31 GB</td>
   </tr>
 </table>
 
@@ -28,17 +30,23 @@ https://github.com/user-attachments/assets/b2d6810e-0868-49cd-830f-739d8cb230b3
 
 https://github.com/user-attachments/assets/32009a75-980b-4666-831b-a5e763c014bf
 
+*Living Voyage*, a holiday in Dagestan; five of the clips had lost their gyro
+([how it was made](docs/examples/dagestan.md)):
+
+https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
+
 ## What it does
 
 - Music: beat grid, bars, phrases and loudness of the track. The track is shortened by whole phrases to the
   requested length; cuts fall on beats.
 - Footage analysis, on your machine:
-  - camera motion from the gyro track, if the camera records one (DJI, GoPro): turns, dives, climbs, flips,
-    close passes, a piloting score;
+  - camera motion from the gyro track, if the camera records one (DJI, GoPro), or from the picture of a clip
+    stabilized elsewhere whose gyro is gone: turns, dives, climbs, flips, close passes, a piloting score;
   - people: who is in view, which of them is the pilot (FPV goggles or a radio), flying between someone's legs
     or over them, a main character described in words or shown by an example image;
   - places and activities by text query (CLIP), routes through several places, grouping clips by location;
-  - earlier exports in the footage folder, matched to the original clips.
+  - earlier exports in the footage folder, matched to the original clips;
+  - beautiful views, on request, with beauty in the job's own words (mountains, a beach).
 - Editing: shot choice, pacing, how much of the pilot to show, the track, two or three variants. You comment
   on 640 px previews, and the next preview follows the comments.
 - QC: an OK / WARN report for each edit (length, rhythm, people, piloting, repeated activities, dark or
@@ -48,19 +56,23 @@ https://github.com/user-attachments/assets/32009a75-980b-4666-831b-a5e763c014bf
 ## Tokens and time
 
 The detectors (YOLO, CLIP) run locally; the model reads their numbers, not frames. Measured from the Claude
-Code session logs of the two example clips, from the task to the edit the owner accepted:
+Code session logs of the example clips, from the task to the edit the owner accepted:
 
-| | Crinoline Dreams | Carefree |
-|---|---|---|
-| footage | 5 clips, ~16 min | 5 clips, ~20 min |
-| time from the task to the accepted edit | 3 h 37 min ¹ | 1 h 08 min |
-| requests to the model | 86 | 64 |
-| tokens read, full-price equivalent ² | 2.1 M | 1.0 M |
-| tokens written | 107 k | 103 k |
-| images the model looked at | 3 | 10 |
+| | Crinoline Dreams | Carefree | Living Voyage |
+|---|---|---|---|
+| footage | 5 clips, ~16 min | 5 clips, ~20 min | 14 clips, ~47 min, 31 GB |
+| time from the task to the accepted edit | 3 h 37 min ¹ | 1 h 08 min | ~1 h 30 min ³ |
+| requests to the model | 86 | 64 | ~120 ³ |
+| tokens read, full-price equivalent ² | 2.1 M | 1.0 M | ~2 M ³ |
+| tokens written | 107 k | 103 k | ~80 k ³ |
+| images the model looked at | 3 | 10 | 17 ³ |
 
 ¹ The people detector was written during this job.
 ² Re-reading cached context counts 0.1 of a full-price token, writing it 1.25.
+³ The job alone, estimated: the session (2 h 41 min, 242 requests, 7.7 M read, 261 k written, 21 images) also
+wrote motion from the picture, beautiful views and changing a finished edit, and waited ~70 min for the footage
+to copy off a slow USB drive. Its requests split by what they did: 119 for the job, 3.6 M read, in a context
+about twice as long as the job alone would have had.
 
 | step (15 min of 4K footage, RTX 3050) | time |
 |---|---|
@@ -136,8 +148,9 @@ matching only. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, A
 
 Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
 `scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
-face matching only), DJI's D-Log M to Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same
-file), tracks from [incompetech.com](https://incompetech.com).
+face matching only), the LAION aesthetic predictor for CLIP ViT-B/32 (beautiful views only), DJI's D-Log M to
+Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks from
+[incompetech.com](https://incompetech.com).
 
 ## Scripts
 
@@ -148,6 +161,10 @@ file), tracks from [incompetech.com](https://incompetech.com).
 | `people.py` | poses, the pilot, close passes, a main character in words or by example |
 | `places.py` | places and activities by text, routes, locations |
 | `exports.py` | earlier exports matched to the originals |
+| `vis_motion.py` | camera motion from the picture, for clips stabilized elsewhere |
+| `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
+| `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
+| `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, the ending taking over |
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
 | `music_check.py` | checks a track: constant tempo, phrases |
@@ -155,7 +172,7 @@ file), tracks from [incompetech.com](https://incompetech.com).
 
 ## Not implemented yet
 
-- Footage without motion data: such clips are skipped for now; they could be edited from detection alone.
+- Footage without motion data that was never stabilized (phone clips, goggle recordings): skipped for now.
 - Tracks without a constant tempo.
 
 ## Credits
@@ -165,7 +182,7 @@ file), tracks from [incompetech.com](https://incompetech.com).
 - [Gyroflow](https://gyroflow.xyz) (GPL-3.0), run as an external program.
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (AGPL-3.0),
   [CLIP](https://github.com/openai/CLIP) (MIT), SFace from the [OpenCV Model Zoo](https://github.com/opencv/opencv_zoo)
-  (Apache-2.0).
+  (Apache-2.0), the [LAION aesthetic predictor](https://github.com/LAION-AI/aesthetic-predictor) (MIT).
 - See also [PostFlight](https://github.com/Okhr/postflight): DJI FPV footage from the SD card to stabilized,
   graded clips.
 
