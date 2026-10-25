@@ -2,6 +2,9 @@
 
 # montAIge
 
+> *"I liked it, and people with worse taste are absolutely delighted."*
+> — Zinovy Gerdt
+
 Edits drone and action-camera footage to music. Claude (in Claude Code) makes the editing decisions. To be
 honest, ChatGPT would cope too, but Claude wrote all this, so there you have it, ladies and gentlemen. Scripts
 on your GPU analyse the footage and give the model numbers and short text summaries instead of frames.
