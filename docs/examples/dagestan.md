@@ -36,18 +36,17 @@ out great".
 ## Prompt and comments
 
 > **Prompt:** There are many locations: I want a holiday report. Pick cool, dynamic flights; if there are people
-> (us), try to keep them. But beautiful flybys over beautiful places are needed too. How will you understand
-> that? A riddle. Maybe add a new "beauty" tracker? The final video: a minute, two at most, an overview.
+> (us), try to keep them, but beautiful flybys over beautiful places are needed too. How will you understand
+> that? A riddle. Maybe add a new "beauty" tracker? The final video: a minute, two at most. I don't want to
+> listen to the music in advance: just make 2-3 videos; previews at 640 px for now.
 
-Comments on the way:
-- On beauty: "maybe it should not be on by default? An option: there are endless kinds of beauty; ours is
-  nature, someone else will edit girls on a beach."
-- "I don't want to listen to the music in advance: just make 2-3 videos."
-- "Voyage sounds nicest, but 0:47 is a dull landing, not the point." "A landing can be an ending: just mark
-  them and decide later." "The last 10 seconds: better something else."
+The first previews:
+- "Voyage sounds best, but 0:47 is a dull landing, not the point; the same moment is in the other video too.
+  Tabuk is out: the music doesn't fit."
+- "Voyage is the main one, it's fine; I only don't like its ending. The last 10 seconds: better put something
+  else there."
+
+Finishing Voyage:
 - "1:04: a bad end of the shot with the houses on the mountain."
-- "The hover over the man in the yellow raincoat: that was me. Bring it back." "The pass under the
-  ekranoplan's engines with people is a good moment." "1:17-1:25 is rubbish, just me standing."
-- "Why did you cut the music? Deleting knocks the rhythm off for all the next scenes: only replacing. Here there
-  is an ending: delete, play with the ending."
-- "So far this is the best example: 30 GB of video, and it came out great."
+- "1:17-1:25 is rubbish, just me standing: it can go, or put something else instead. The plane at the end is
+  fine as it is, and the music ends in silence anyway."
