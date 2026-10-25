@@ -35,11 +35,9 @@ out great".
 
 ## Prompt and comments
 
-> **Prompt:** Part of the files are already stabilized, and they are the most interesting ones. Is there really
-> no gyro left in them? We need to come up with something: tracks from the picture? There are many locations: I
-> want a holiday report. Pick cool, dynamic flights; if there are people (us), try to keep them. But beautiful
-> flybys over beautiful places are needed too. How will you understand that? A riddle. Maybe add a new
-> "beauty" tracker? The final video: a minute, two at most, an overview.
+> **Prompt:** There are many locations: I want a holiday report. Pick cool, dynamic flights; if there are people
+> (us), try to keep them. But beautiful flybys over beautiful places are needed too. How will you understand
+> that? A riddle. Maybe add a new "beauty" tracker? The final video: a minute, two at most, an overview.
 
 Comments on the way:
 - On beauty: "maybe it should not be on by default? An option: there are endless kinds of beauty; ours is
