@@ -6,13 +6,14 @@ from the picture.
 **Task:** a holiday report, 1-2 minutes. Dynamic flying, "us" when there are people, and beautiful flybys over
 beautiful places. The owner did not remember where they had been: "that's why I want the video".
 
-**How it went:** the places came out of the footage itself: the turquoise Sulak canyon (5 Sep), the ekranoplan
-on the Caspian beach (7 and 9 Sep), the abandoned stone village of Gamsutl on its peak (8 Sep). Scenes went
-day by day, beautiful views counting as much as good flying. Three first cuts on three tracks; the owner chose
+**How it went:** the places came out of the footage and the GoPro's GPS: the turquoise Avar Koysu by the Irganay
+reservoir (5 Sep; the picture alone said "the Sulak canyon", the GPS said otherwise), the ekranoplan on the
+Caspian beach south of Derbent (7 and 9 Sep), the abandoned stone village of Gamsutl on its peak (8 Sep).
+Scenes went day by day, beautiful views counting as much as good flying. Three first cuts on three tracks; the owner chose
 one by ear and then fixed single moments: a dull landing, a shot that turned away from the village, a scene of
 him just standing. Each fix changed that scene only; the music and everything else stayed in place.
 
-**The edit:** *Living Voyage* (122 BPM), 1:31, 12 scenes in date order: the Sulak canyon with people waving on
+**The edit:** *Living Voyage* (122 BPM), 1:31, 12 scenes in date order: the turquoise Koysu with people waving on
 the rocks, the owner in a yellow raincoat by the ekranoplan in the rain, a pass under its engines, Gamsutl from
 above and the village on its peak, a dive over the surf line, and the ekranoplan seen whole from above as the
 ending. The owner: "so far the best example: 30 GB of video, and it came out great".

@@ -162,6 +162,7 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `places.py` | places and activities by text, routes, locations |
 | `exports.py` | earlier exports matched to the originals |
 | `vis_motion.py` | camera motion from the picture, for clips stabilized elsewhere |
+| `gps.py` | where a GoPro clip was shot, from its GPS |
 | `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
 | `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
 | `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, the ending taking over |

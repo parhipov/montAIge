@@ -200,6 +200,9 @@ which owners call beautiful: those come in as editor's pieces.
   swing 23 s, the pilot 56 s of 14 min, as seen by eye. Wording matters: "a man working on a roof" caught the
   roof from every angle (0.42-0.97, 0.22 at most elsewhere), "a man on a ladder repairing the roof of a wooden
   shed" missed it from above. `qc.py` reports activities per scene from these.
+- **Where it was** (`gps.py`): a place named from the picture is a guess. A turquoise river in a canyon read as
+  the Sulak canyon by eye and by CLIP; the GoPro's GPS (GPMF GPS5) put it 30 km south, on the Avar Koysu by the
+  Irganay reservoir. Check names against the GPS before captions or a title. ([dagestan](examples/dagestan.md))
 - **Old exports** (`exports.py`): centre thumbnails at 10 Hz, aspect matched, best correlation over every
   offset; pieces that run on in the same original merge. A 35 s export was found at 72.8-107.8 s (0.84
   against 0.13); a whole-clip export is reported as a copy, not a pick.
