@@ -1,0 +1,211 @@
+# Notes: methods and measurements
+
+What the scripts do and why, with the numbers that decided it. The jobs these come from are in
+[examples/](examples/).
+
+## The idea
+
+Most AI editing tools cut a video from its text: a transcript or a description of each shot. Drone and
+action-camera footage has no text, but the camera often records its own orientation hundreds of times a
+second. So the music leads (beats, phrases and energy from the audio), the telemetry and local detectors
+describe the footage, and an optimiser places each shot where the footage moves like the music. The same
+inputs give the same edit; `--seed N` gives another, repeatable one. Pictures come from whole-clip Gyroflow
+renders (same frame count as the original), telemetry from the original.
+
+## Music
+
+- **Beat grid.** Studio tracks keep a constant tempo, so a grid fit (BPM and phase maximising onset strength)
+  beats a dynamic-programming tracker: the DP tracker wobbled by 127 ms on one track, the grid stays within
+  ±7 ms. The downbeat is the beat position (of 4) with the most kick energy; the phrase phase is where the
+  bar-loudness jumps line up. Phrases are 16 beats with an energy class 0-3.
+- **Checking a track** (`music_check.py`): a studio track sits within ~10 ms of a constant grid; one sat
+  68 ms off and was dropped, a live-played one wandered ±57 ms. The detector can pick a wrong multiple (73 BPM
+  against 110 in the catalogue, 107 against 130): pass the catalogue BPM.
+- **Shortening** (`music_edit.py`): whole phrases are cut, at most 3 jumps, only where the music sounds the
+  same (phrase j like phrase i+1, judged on bar-aligned log spectra), joins on downbeats so the grid stays
+  exact. Similarity alone kept 39 s of quiet intro and skipped the big part, so the path cost also rewards
+  the mean energy of the kept phrases and keeping a drop. Lengths come in phrase steps (10 s at 96 BPM):
+  `--target` gets the nearest path with good joins.
+- **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
+  with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
+  pieces return 404.
+
+## Telemetry and manoeuvres
+
+- **Attitude.** In DJI's fused frame world up is −Z for `q_cam`. Image-down agrees with world down on
+  96-99 % of frames; the camera is upside down on 0.2-2.7 % (flips). On the ground the camera elevation is
+  −2..+11°, so "nose down" in the air means speed or a dive, and image parallax tells which. GoPro motion comes
+  through Gyroflow's export (`--export-metadata 3`, `org_quat`), also world up −Z.
+- **Trimming.** The first 3 s and the last 5 s go; a spike over 2000°/s near the end is a crash and
+  everything after it goes; so does any 2 s with neither vibration nor rotation, and blown-out or black frames.
+- **Motion onsets** are peaks of the derivative of the visible (1.5 Hz low-passed) rotation rate; they are
+  what lands on beats. At random an onset falls within ±40 ms of a beat ~13 % of the time at 101 BPM.
+- **Manoeuvre kinds:** roll, spin or loop (more than 250° in 1 s, by axis), dive (camera more than 45° below
+  the horizon), pull-up (camera up more than 50° in 1 s), close pass (parallax above the 98.5th percentile,
+  little rotation), descent from height (camera more than 18° down for 1.5 s while everything is far), ascent
+  (below).
+- **Ascents and arcs** come from the picture, since there is no altitude in the telemetry: the CLIP
+  probability of "a view from high above" against ground-level views, the sky and a roof up close rises from
+  under 0.3 to over 0.6 within 8 s and stays over 0.65 for 2.5 s with everything far (parallax rank under 0.5).
+  On one shoot that found all 7 climbs seen on a sheet and 3 more, nothing else; without the sky and the roof
+  among the alternatives, flying close over a roof and a chimney against the sky got in. The camera angle does
+  not separate them (−8..+6° on most climbs). The way back to the ground closes an arc; "up 24 s, far 0.13"
+  ranks how high it went. ([village](examples/village.md))
+- **Movement signature** per frame: dive, pull-up, pitch-down, turn left, turn right, roll, close pass,
+  cruise. A shot that moves like one placed within ~25 s of music pays `W_MOVE` (cosine above 0.6).
+
+## The picture
+
+- **Image motion** (`analyze.py`): Farneback flow on 160 px grey frames at half the frame rate, a global
+  affine fit; the residual (p90) is what camera rotation cannot explain, i.e. parallax from things close by.
+  An aggressive flight had a median of 1.7 against 0.9 for calm ones.
+- **Look-alikes:** 12×9 Lab thumbnails, RMS distance; σ = 0.56 × the median distance between random frames
+  (22 on a construction site, 15.5 in a grey hall; a fixed 22 counted 71 pairs alike in the hall, the scaled
+  one 9). Thumbnails do not see one subject from different angles; whole-frame CLIP does not either (random
+  windows 0.88, the same roof 0.97, unrelated gardens up to 0.96). Activities in words do (Places).
+- **Decoding:** 4K HEVC 10-bit decodes at ~36 fps on the CPU in PyAV; NVDEC through PyAV was slower
+  (17 fps, the download to host memory); 640 px proxies decode at ~780 fps. Three Gyroflow renders in parallel
+  give ~46 fps in total from 4K HEVC 10-bit. When re-encoding with PyAV, set `frame.time_base` with
+  `frame.pts`, or the muxer fails with EINVAL.
+
+## Piloting score
+
+A percentile across all footage. Action (loud music): parallax 0.45, forward lean or dive 0.25, rotation
+0.30. Cinematic (quiet music): parallax 0.55, lean 0.30, smoothness 0.15 (1 − rank of angular jerk); the two
+are mixed by the music energy, because matching quiet music to little rotation picked dull flying for the
+openings. With climbs asked for, the cinematic score takes 0.25 of CLIP height. The best windows are low fast
+passes and dives; the worst are hovering in front of people. It misses slow descents and climbs (~0.1-0.4),
+which owners call beautiful: those come in as editor's pieces.
+
+## Structure of an edit
+
+- **Scenes:** one clip per 16-beat phrase; shots inside jump 1-12 s forward, chosen together by a DP. Inside
+  a scene the camera keeps turning the same way across a cut (continuity 0.76 against 0.48 for random pairs).
+- **Speed:** ramps bend speed between 0.7x and 1.4x through beat anchors so onsets land on beats (sync from
+  44 % to 71 % on the first test; read as "breathing" by some, hence off by default). The hero ramp: beat 0
+  rushes in at 1.4x, beats 1-2 at 0.5x with the manoeuvre on beat 2, then base speed; at most 2, where the
+  music lifts most, never the same kind twice. `--pace`: loud phrases at 1.1-1.2x, which hides hesitation.
+  50 fps shown at 25 fps is true slow motion; 25 fps sources get frame blending.
+- **Editor's pieces** (`--must/--start/--end`) are placed before anything else: a hero once took the footage
+  next to a piece and the piece silently became another shot. A piece longer than its shots gets the whole
+  phrase; longer than the phrase, it plays faster, up to 1.7x (a 25 s climb in a 15 s phrase). `--start`
+  folds the pickup before the first phrase into the opening shot. An `--end` moment ends 2 s before the end,
+  so the fade-out follows it.
+- **Flying scenes** (`--fly N`): one whole phrase around a manoeuvre, people ignored; elsewhere in a people
+  edit a shot with nobody in it pays `W_EMPTY`.
+- **Distance in time:** footage close to another scene's shot pays `W_NEAR` (2, over 20 s); the parts of a
+  split recording count as one flight (an edit once opened with two passes over the same warm-up 17 s apart).
+- **Themes** (`--theme "TEXT[:N]"`): a scene shows a theme when one of its shots averages 0.4 or more; once
+  a theme has its N scenes, a candidate pays `W_THEME` 8, full from 0.55, nothing under 0.35. At 4 on a
+  linear ramp a repeated person still came back (a person is worth `W_PEOPLE`). A shot under 2 s does not use
+  a theme up. ([village](examples/village.md))
+- Fades: 0.6 s in, 2 s out, the same in the preview and the final.
+
+## People and the pilot
+
+- **Detection** (`people.py detect`): YOLOv8s-pose, 2 samples a second; per person the box, 17 keypoints and
+  flags: radio pose (wrists together in front of the torso), waving (a wrist above the shoulders), facing the
+  camera, a radio in the hands (COCO `remote`/`cell phone` near the wrists). ~1 min on the GPU for 16 min.
+- **People value:** a person covering 2 % of the frame or more counts 1, smaller ones less; ×1.3 facing the
+  camera, ×1.6 waving; approaching or receding within ±0.5 s adds 0.5; a pass between the legs, under or over
+  adds 1.5. `--people 4` weighs it like piloting.
+- **The pilot** is the easiest person to pick: standing still, close to every take-off, in every flight. In
+  one people edit nearly all "people" were the pilot. Clothes-colour clustering failed (backlit dark jackets,
+  children holding toys strike the radio pose). CLIP zero-shot on each person crop does it: "wearing FPV
+  goggles" / "holding a drone radio" against children, women, silhouettes and people with busy hands (a pram,
+  a phone, a bag, a child's hand); tracks carry the label to frames where the goggles are not seen. Without
+  the busy-hands alternatives a mother pushing a pram was "the pilot" in 241 of 373 rows; with them 70 rows,
+  all the pilot. ([march](examples/march.md), [koprino](examples/koprino.md))
+- **Pilot budget:** the pilot is worth 0.3 of another person; once 15 % of the edit shows the pilot leading
+  the picture (bigger than anybody else in it), every further such shot pays 3× its share. "Alone in the
+  picture" was not enough: the pilot in front with someone far behind got ~10 s of a 48 s edit.
+- **Close passes** (`people.py passes`): a pass lasts tenths of a second, so it scans at 10 Hz, follows each
+  person by box overlap and tells the way out by the edge the body leaves through: between the legs, under,
+  over, past on a side, "(lying)" for a horizontal body.
+- **Main character in words** (`subject --text`): the crop is widened to take in what is beside the person
+  (a pram, a dog); counts 2× another person. With several look-alike groups set the threshold higher (0.8):
+  at 0.5 most children holding rackets were "a coach". "A child" found 6 rows; "a child swinging a racket"
+  took 88 % of people. ([tennis](examples/tennis.md))
+- **By example** (`who --ref NAME=IMAGE|CLIP:SEC:X`): CLIP embeddings of every crop, each row to the
+  reference it resembles most, the best finds added as references; names with `_` are other people (needed:
+  without the coach as a negative a small girl in black took the coach in black). Defaults 0.80 cosine and a
+  0.03 lead; at 0.84 two of five children were left with almost nothing. A label follows a track only to rows
+  that still look most like that person. At 640 px it cannot carry the pilot by look: everyone in jeans and
+  blue matched, negatives included. `split --k 3` groups one label by look to drop look-alikes.
+- **Faces** (`faces.py`): two children in the same printed T-shirt are told apart only by face. Eyes are
+  ~3 px apart in the renders and ~20 in the 4K originals, so faces are read there (YOLO-pose at 1280 px,
+  aligned on eyes and nose, SFace), the frame matched to the render by an ORB homography; one reference face
+  sorted 142 faces. Reading 4K by seeking took 35 min; reading on between near samples and caching is the fix.
+- **An edit about one person** (`--focus`): a shot is the person, a group with them, or a cutaway (adults,
+  the place), never another child of the same kind instead of them (`--peers`, `W_IMPOSTOR`).
+- **Animals** (`objects.py`) count like a person of the same size; in a garden YOLO sees them in cabbage beds
+  and clothes on a porch, hence `--animals 0`.
+
+## Places and activities
+
+- **Frame embeddings** (`places.py embed`): CLIP ViT-B/32 every 0.5 s, cached; 1.5 min for 30 min of footage.
+- **Search and routes:** softmax over the asked places and alternatives; a route is a stretch of each place
+  in order within `--within` s ("a corridor → a staircase → a tennis court" found the flight the owner
+  remembered, in a few seconds).
+- **Locations:** two clips are alike when the views of each are found in the other (median best cosine, both
+  ways); average linkage joins at 0.83. Three shoots mixed (28 clips): pairs of one place 0.85-0.96, of
+  different places 0.80 at most.
+- **Activities:** a general list against non-activities; on one shoot the roof repair 82 s, mowing 54 s, a
+  swing 23 s, the pilot 56 s of 14 min, as seen by eye. Wording matters: "a man working on a roof" caught the
+  roof from every angle (0.42-0.97, 0.22 at most elsewhere), "a man on a ladder repairing the roof of a wooden
+  shed" missed it from above. `qc.py` reports activities per scene from these.
+- **Old exports** (`exports.py`): centre thumbnails at 10 Hz, aspect matched, best correlation over every
+  offset; pieces that run on in the same original merge. A 35 s export was found at 72.8-107.8 s (0.84
+  against 0.13); a whole-clip export is reported as a copy, not a pick.
+
+## Gyroflow and stabilization
+
+- Whole clips are rendered once at 640 px (`gf_render.py`: ~85 fps from DJI O3 4K 16:9, ~46 fps in total
+  from three parallel renders of 4K HEVC 10-bit 4:3); these are the proxies, frame for frame with the original.
+- A render with in/out points is aligned by correlating visible gyro rotation with the render's flow
+  magnitude: −1..+2 frames on 9 artificial cuts.
+- `trim_range_only` (on by default) freezes the camera past the edges of a trim: a 6 s piece differed from the
+  whole-clip render by 2-3 (0-255) in the middle and up to 20 in its last 1.5 s; off, 0.2-0.4 and 2-4. Pieces
+  keep 1 s of margin.
+- The CLI never sets a bitrate below the source's; force it through `encoder_options`. H.264 on NVENC is
+  8-bit only (`-pix_fmt nv12` for 10-bit sources) and stops at 4096 px (HEVC above that).
+- Propellers or a lens guard in view are framing: Gyroflow's zoom, or `--zoom` (1.16 hid a guard's dark arcs
+  and blue corners; a frame-edge darkness metric could not tell them from tree shadows).
+- DJI goggle recordings (`DJIG*.mp4`) carry no gyro and are skipped.
+
+## Colour
+
+- A 3D `.cube` is expanded once into a 256³ table (trilinear, 2 s) and applied with one lookup per frame
+  (~15 ms at 640×480). Frames are decoded as BT.709 limited range explicitly (untagged proxies would be read
+  as BT.601); output is tagged BT.709. A circulating "Avata 2 LUT" is a 1D tone curve, not used.
+- Every official DJI D-Log M → Rec.709 LUT (O4, Avata 2, Mini 4 Pro, Air 3/3S, Flip, Pocket 3, Action 4/5,
+  Nano, 360) is the same file. Indoors it looked dim and green; `--grade auto` adds per-shot levels (p0.5 → 6,
+  p99.5 → 242) and white balance from near-white pixels, constant within a shot, alike across the edit.
+
+## Finals
+
+`final.py` renders only the pieces used (Gyroflow trims with margin, `trim_range_only` off), finds each
+piece's start by motion correlation (±1-3 frames from the asked millisecond), applies the LUT and grade on
+the GPU and encodes with NVENC. A 45 s 16:9 4K edit: 9.5 min with x264 on the CPU; a 40 s 4:3 4K D-Log edit:
+33 min, 25 with 10-bit pieces and NVENC; a 58 s 4:3 4K edit with zoom: ~23 min. Slow motion at 50 fps repeats
+frames (no interpolation yet).
+
+## QC
+
+`qc.py` prints about a dozen OK/WARN lines. From the plan: length, shot lengths, chronology, movement
+variety, people, the pilot leading the picture, the main character, piloting (shots of people up close and
+editor's pieces apart: hovering is their point), activities per scene, flights. From the picture: audio
+against video length, dark frames, frozen frames, brightness jumps at cuts.
+
+## Ideas not done yet
+
+- Footage without motion data: edit from detection alone instead of skipping it.
+- Tracks without a constant tempo: a neural beat tracker (Beat This!), drum stems for cleaner accents.
+- Slow motion in finals: frame interpolation, or 100 fps sources.
+- Pick the best of N seeds by skill, sync and variety.
+- Trick types from the gyro axes (flip, roll, power loop, split-S); flips on snares, rolls on fills.
+- Proximity from the flow that pure camera rotation predicts, instead of an affine residual.
+- Gaps as heroes: flying through an opening shows as a 0.2-0.4 s brightness dip with high parallax and a new
+  scene after it.
+- Per-shot Gyroflow settings: horizon lock off for flips.
+- An EDL / OTIO export for finishing by hand.

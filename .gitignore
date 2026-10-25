@@ -1,0 +1,9 @@
+# jobs, proxies, caches, previews and finals
+out/
+# music, LUTs and model weights (see README: Requirements)
+models/
+# this machine: tool paths and footage folders
+LOCAL.md
+__pycache__/
+*.pyc
+.venv*/
