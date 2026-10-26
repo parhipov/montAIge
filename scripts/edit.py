@@ -18,7 +18,8 @@ x1.3 facing the camera, x1.6 waving; the pilot is rationed), variety (movement k
 --theme activities), distance in time from other scenes. Same inputs and seed give the same edit; --seed N
 adds seeded noise for another variant.
 
-Editor's input: --must / --start / --end CLIP:SEC or CLIP:START-END (or find:TEXT through places.py) put a
+Editor's input: --must / --start / --end CLIP:SEC or CLIP:START-END (or find:TEXT through places.py, hear:TEXT
+through sounds.py) put a
 moment or a piece in the edit; a piece longer than its phrase plays faster, up to PIECE_MAX_SPEED. --fly N:
 flying scenes built around a manoeuvre on the biggest music lifts. --heroes N with --ramps: the classic ramp
 (rush in, the manoeuvre slow, back to speed). --want KIND, --arcs N: climbs and up-and-down arcs. A series
@@ -2146,7 +2147,8 @@ def make_parser():
     ap.add_argument('--must', action='append', default=[],
                     help='CLIP:SECONDS or CLIP:START-END, a moment or a piece the edit has to show (repeatable); '
                          '--must, --start and --end also take find:TEXT, e.g. "find:a corridor -> a staircase -> '
-                         'a tennis court" (places.py: the best stretch, or the best route through the places)')
+                         'a tennis court" (places.py: the best stretch, or the best route through the places), and '
+                         'hear:TEXT, e.g. "hear:people laughing" (sounds.py: the best moment of the clips\' sound)')
     ap.add_argument('--end', default=None, help='CLIP:SECONDS or CLIP:START-END, what the last shot shows')
     ap.add_argument('-o', '--out', required=True)
     ap.add_argument('--target', type=float, default=None, help='shorten the track to about this many seconds')
@@ -2344,6 +2346,15 @@ def main():
             f = next(f for f in flights if os.path.normcase(f.stab) == os.path.normcase(r))
             spec = f'{f.name}:{t0_:.1f}-{t1_:.1f}'
             print(f'  found {spec} (p {pr:.2f})')
+        elif spec.startswith('hear:'):                           # the piece by its sound (sounds.py, CLAP)
+            import sounds
+            hit = sounds.find([(f.src, f.stab) for f in flights], spec[5:])
+            if hit is None:
+                raise SystemExit(f'{spec}: nothing in the footage sounds like that')
+            r, t0_, t1_, pr = hit
+            f = next(f for f in flights if os.path.normcase(f.stab) == os.path.normcase(r))
+            spec = f'{f.name}:{t0_:.1f}-{t1_:.1f}'
+            print(f'  heard {spec} (p {pr:.2f})')
         stem, sec = spec.rsplit(':', 1)
         f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
         if f is None:

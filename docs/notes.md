@@ -292,6 +292,14 @@ which owners call beautiful: those come in as editor's pieces.
   swing 23 s, the pilot 56 s of 14 min, as seen by eye. Wording matters: "a man working on a roof" caught the
   roof from every angle (0.42-0.97, 0.22 at most elsewhere), "a man on a ladder repairing the roof of a wooden
   shed" missed it from above. `qc.py` reports activities per scene from these.
+- **The footage's own sound** (`sounds.py`, CLAP `laion/larger_clap_general`; job `sounds = true`; edit.py
+  `hear:TEXT` pieces; Insta360 and GoPro listen to it too): 2 s windows every second, a sound in words against
+  what else footage hears. A carried camera hears people, a drone its propellers. Arkhyz (66 min on the slopes):
+  wind in the microphone 1535 s, a humming machine 833 s (wind too, most likely), skis on snow 624 s, a shout of
+  joy 110 s, laughter 11 s, talking 6 s; embedding took 4 min (8 with the first decode from a busy disk). The
+  laughs: Marina up close against the mountains (inside the stretch the owner liked most), and a friend skiing
+  ahead with the helmet looking at the snow: the right moment, a weak picture, so the sound itself belongs in
+  the mix (Ideas: sound bites). Not checked by ear yet.
 - **Where it was** (`gps.py`): a place named from the picture is a guess. A turquoise river in a canyon read as
   the Sulak canyon by eye and by CLIP; the GoPro's GPS (GPMF GPS5) put it 30 km south, on the Avar Koysu by the
   Irganay reservoir. Check names against the GPS before captions or a title. ([dagestan](examples/dagestan.md))
@@ -384,6 +392,6 @@ cut, and two hits before that cut falling on level flight.
   anyway (screenshots of its main characters). On a minute of an FPV drone chasing children warming up on a
   tennis court the strongest "beats" were running steps and bodies cut by the frame's edge: nothing to cut on.
   Worth trying on footage of accented moves towards a steadier camera (a serve, a jump), on tracks the job has.
-- The footage's own sound, in words (CLAP, the audio twin of CLIP): laughter, a splash, shouting as `find:`
-  and themes (Insta360 and GoPro listen to it). Carried cameras only: a drone hears its propellers. No footage
-  to try it on yet.
+- Sound bites: the footage's own laugh or shout under the music (the music ducked for 1-2 s), at the moments
+  `sounds.py` hears. Without it a `hear:` piece shows only the picture of the moment, and that can be snow under
+  the skis.

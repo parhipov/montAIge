@@ -20,6 +20,8 @@ paths in it); the job's name is its folder (or `name = ...`):
     people = true                            # poses, pilot, close passes (default true)
     objects = false                          # animals, vehicles (objects.py)
     places = true                            # CLIP frame embeddings for find:TEXT pieces (default true)
+    sounds = false                           # CLAP of the clips' sound for hear:TEXT pieces (sounds.py; a carried
+                                             # camera hears people, a drone its propellers)
     beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
     plain = ["snow up close"]                # what fills this footage without being a view (beauty.py --plain)
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
@@ -244,6 +246,9 @@ def features(job, out, proxy):
         run([os.path.join(HERE, 'objects.py'), '--weights', os.path.join(yolo, 'yolov8s.pt')] + renders, log)
     if job.get('places', True):
         run([os.path.join(HERE, 'places.py'), 'embed'] + renders + ['--clip-cache', os.path.join(MODELS, 'clip')], log)
+    if job.get('sounds', False):                                 # the clips' own sound in words (hear:TEXT pieces)
+        run([os.path.join(HERE, 'sounds.py'), 'embed', '--list', os.path.join(out, 'originals.txt'),
+             '--proxy-dir', proxy], log)
     if job.get('beauty'):                                        # beautiful views in the job's words (edit.py --beauty)
         run([os.path.join(HERE, 'beauty.py')] + renders + [x for t in job['beauty'] for x in ('--text', t)] +
             [x for t in job.get('plain', []) for x in ('--plain', t)] +

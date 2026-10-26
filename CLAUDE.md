@@ -53,7 +53,7 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo only (`music_check.py`), the
   catalogue BPM as `bpm`. Kevin MacLeod, CC BY 4.0: credit when publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
-  `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` fills itself from Hugging Face; `faces/` SFace from the
+  `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
 - The owner watches as it goes: keep steps short, say what is running, take comments in between.
 - A new job in a new session: every request re-reads the whole conversation, and a job done late in a long
@@ -131,7 +131,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty). Landings
   are marked and kept for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
-  B -> C`; a piece longer than its phrase plays faster, up to 1.7x.
+  B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`); a piece longer than its phrase plays
+  faster, up to 1.7x.
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z` (kept in the EDL for `final.py`).
 - `--plan-only`, `--debug`, `--height`, `--fps`.
 
@@ -139,6 +140,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 
 - `people.py track|subject|who|split|passes|summary`: tracks through every other frame, main characters in
   words or by example (a screenshot found in the footage), look-alike groups, close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
+- `sounds.py embed|search`: the clips' own sound in words (laughter, a shout of joy): a carried camera hears
+  people, a drone its propellers.
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
