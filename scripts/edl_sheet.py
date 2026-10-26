@@ -96,7 +96,7 @@ def cut_sheet(e, a):
     if [os.path.basename(f.src) for f in flights] != [os.path.basename(f['original']) for f in fl]:
         raise SystemExit('the footage is not the one the EDL was made from')
     strong = 0.5 * float(np.median(np.concatenate([f.peak_strength for f in flights])))     # as edit.hit_stats
-    m = edit.analyse_music(e['music'], e['bpm'])
+    m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     beats, P, hit = m['beats'], m['period'], m['hit']
     env = m['env'] / max(float(np.percentile(m['env'], 99)), 1e-9)
 

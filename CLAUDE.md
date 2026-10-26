@@ -106,7 +106,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 ## edit.py options
 
 - Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`,
-  `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the musical hits).
+  `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the musical hits), `--booms` (the hits
+  are the bass booms, the sub-bass coming in after a gap: "cuts on the boom" of a song).
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
   `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another

@@ -14,7 +14,8 @@ flip (seconds) stays.
 The pinhole has its own horizontal and vertical field of view: GoPro SuperView squeezes a 4:3 view into 16:9,
 and Gyroflow keeps that. Without --hfov/--vfov both are found in the picture (calibrate): a wide lens shows
 the focal length, because with a wrong one the edges of the frame move unlike its centre and no rotation
-fits; the field of view whose rotations fit the tracks best wins.
+fits; the field of view whose rotations fit the tracks best wins. Calm flying over open water fools it (a WARN
+on an aspect neither square nor SuperView's): there --hfov alone gives a picture of square pixels (DJI).
 
 Saved: frame, rot (n x 3, rad, rotation vector of frame k-1 -> k, camera axes), inl (inlier share; under TRUST_INL
 the tilt is not trusted: flying low over a slope), npts,
@@ -47,6 +48,11 @@ TRUST_INL, TAU_LOW_S = 0.6, 1.0
 # 15 px (25 pairs). Gyroflow's dynamic zoom moves the focal length of that render +-15 % anyway (fov_scale 0.77-1.04)
 CAL_PAIRS, CAL_MOVE_PX = 160, 8.0
 HFOV_GRID, VFOV_GRID, CAL_FINE = np.arange(70, 136, 5.0), np.arange(40, 136, 5.0), np.arange(-4, 5, 1.0)
+# a calibrated view is believed when its pixel aspect (tan(vfov/2) / tan(hfov/2) * W / H) is square or SuperView's
+# 4:3 in 16:9 (1.33). Calm orbits over open water (glare, a moving boat; 25-28 pairs moving 8 px of 160) gave
+# 100 x 134 and 104 x 97 deg on DJI O3 exports (3.5 and 1.6); with square pixels the hfov alone had a clear best at
+# 108-112 deg on all four flights of that trip (pairs moving 4 px)
+PIXEL_ASPECTS = ((0.9, 1.1), (1.25, 1.45))
 
 
 def kabsch(a, b):
@@ -177,6 +183,13 @@ def calibrate(path, rng):
     return hf, vf, len(pairs), best, med
 
 
+def square_vfov(path, hfov):
+    """The vertical field of view of a picture with square pixels and this horizontal one."""
+    with av.open(path) as c:
+        W, H = c.streams.video[0].codec_context.width, c.streams.video[0].codec_context.height
+    return float(np.degrees(2 * np.arctan(np.tan(np.radians(hfov) / 2) * H / W))), W, H
+
+
 def pair_rotations(path, hfov, vfov):
     """Rotation of the camera between frames k-1 and k for every frame k of a video (frame 0: none).
     The corners start where the last rotation would take them (a flip turns the picture ~15 deg a frame, beyond
@@ -264,10 +277,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('renders', nargs='+')
     ap.add_argument('--hfov', type=float, default=None, help='horizontal field of view of the picture, deg')
-    ap.add_argument('--vfov', type=float, default=None, help='vertical field of view (default: calibrated)')
+    ap.add_argument('--vfov', type=float, default=None,
+                    help='vertical field of view (default: from --hfov with square pixels, else calibrated)')
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--integrate', action='store_true', help='only chain the saved rotations again (new pull settings)')
     a = ap.parse_args()
+    failed = []
     for r in a.renders:
         dst = os.path.splitext(r)[0] + '_vis.npz'
         if a.integrate:
@@ -281,13 +296,22 @@ def main():
             continue
         t0 = time.time()
         hf, vf = a.hfov, a.vfov
+        if hf is not None and vf is None:
+            vf = square_vfov(r, hf)[0]
         if hf is None or vf is None:
             cal = calibrate(r, np.random.default_rng(0))
             if cal is None:
-                raise SystemExit(f'{os.path.basename(r)}: too little motion to find the field of view; pass --hfov --vfov')
+                print(f'{os.path.basename(r)}: too little motion to find the field of view; pass --hfov (square '
+                      f'pixels) or --hfov --vfov', flush=True)
+                failed.append(r)
+                continue
             hf, vf = hf or cal[0], vf or cal[1]
+            _, W, H = square_vfov(r, hf)
+            aspect = np.tan(np.radians(vf) / 2) / np.tan(np.radians(hf) / 2) * W / H
             print(f'{os.path.basename(r)}: field of view {cal[0]:.0f} x {cal[1]:.0f} deg from {cal[2]} moving frame '
-                  f'pairs (cost {cal[3]:.2f} px^2, median over the grid {cal[4]:.2f})', flush=True)
+                  f'pairs (cost {cal[3]:.2f} px^2, median over the grid {cal[4]:.2f})'
+                  + ('' if any(lo <= aspect <= hi for lo, hi in PIXEL_ASPECTS) else
+                     f'; WARN pixel aspect {aspect:.2f}, neither square nor SuperView: pass --hfov'), flush=True)
         fr, rot, inl, npt, fps = pair_rotations(r, hf, vf)
         q = integrate(rot, fps, trust=trusted(inl, fps))
         np.savez(dst, frame=fr, rot=rot.astype(np.float32), inl=inl.astype(np.float32), npts=npt, q=q, fps=fps,
@@ -295,6 +319,7 @@ def main():
         print(f'{os.path.basename(r)}: {len(fr)} frames, median {np.median(npt):.0f} tracks, inliers '
               f'{np.median(inl[1:]) * 100:.0f} %, rotation trusted on {trusted(inl, fps).mean() * 100:.0f} %, '
               f'in {time.time() - t0:.0f}s', flush=True)
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

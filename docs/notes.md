@@ -25,7 +25,14 @@ renders (same frame count as the original), telemetry from the original.
   same (phrase j like phrase i+1, judged on bar-aligned log spectra), joins on downbeats so the grid stays
   exact. Similarity alone kept 39 s of quiet intro and skipped the big part, so the path cost also rewards
   the mean energy of the kept phrases and keeping a drop. Lengths come in phrase steps (10 s at 96 BPM):
-  `--target` gets the nearest path with good joins.
+  `--target` gets the nearest path with good joins. The cut keeps the whole track's phrases (its first piece
+  starts at 0): found again by bar-loudness jumps, a song cut from its first verse to its last chorus got its
+  phrases a bar late (2.2 s, not 0.2), and the scene cut into the chorus came 2 s after the chorus began.
+- **A song with words.** A song the owner names (not the catalogue) has a chorus everybody knows. Whisper
+  (large-v3-turbo) on the whole mix gave 60-80 s chunks; the hook's words, placed by their share of the words in
+  a chunk, fell within ~2 s of the starts of two sections of every round (a quiet half and a loud half of the
+  chorus). The cut verse → last chorus is a join the song makes itself (phrase likeness 0.99); a join from the
+  end of a chorus into the next one is not (-0.6).
 - **Sections** (`music_edit.sections`, printed by edit.py for every edit): phrases of the whole track joined by
   average linkage on the same bar spectra, the similarity rescaled per track (median pair 0, a copy 1): the
   median pair sat at 0.46 (Shiny Tech) to 0.94 (Morgana Rides), repeats at 0.93-0.99, so a fixed threshold
@@ -39,6 +46,12 @@ renders (same frame count as the original), telemetry from the original.
 - **Drums for the hits: no.** Hits from the percussive part (median-filter separation) were the hits of the
   mix: 63 of 69 (Montauk Point), 55 of 57 (Nonstop), 80 of 88 (Motivator), 21 of 25 (Heroic Age). A hit is
   already a top-10 % onset peak on a beat, and those are drums.
+- **Bass booms** (`--booms`): in a guitar pop song at 120 BPM the "boom" an owner wanted the cuts on was the bass
+  coming in after a short gap on the downbeats of bars 2-4 of every band phrase: the sub-bass (30-90 Hz) +31..+42 dB
+  over the 0.2 s before (bar 1: +16, the bass rings on into it; the quiet half of the chorus has no bass). The mix's
+  onset peaks found 1 of those and put their hits on the beat before (a strum), so cuts moved onto them came 0.5 s
+  early. With the booms as hits (a jump of 20 dB, within 6 dB of the track's loud sub-bass) 20 of 20 sit on
+  downbeats, and every cut of the edit did too (15 of 15; 6 of 16 before).
 - **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
   with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
   pieces return 404.
@@ -107,7 +120,11 @@ renders (same frame count as the original), telemetry from the original.
   found in the picture: with a wrong focal length the edges of a wide frame move unlike its centre and no
   rotation fits, so the grid point whose rotations fit pairs moving 8 px or more best wins (96 x 66° against
   105 x 67° from the gyro; Gyroflow's dynamic zoom moves the focal length ±15 % within a clip anyway). The
-  owner's exports came out 103-108 x 71-76°. On the ground the picture stands still: mean flow under 0.12 px
+  owner's exports came out 103-108 x 71-76°. Calm orbits round a boat on open water (glare, a moving subject)
+  fooled it: 25-28 of 160 pairs moved 8 px, and two DJI O3 exports read 100 x 134° and 104 x 97° (pixel
+  aspects 3.5 and 1.6: neither square nor SuperView's 1.33, now a WARN), two others too little motion; with
+  square pixels the hfov alone had a clear best at 108-112° on all four (pairs moving 4 px), so `--hfov` alone
+  (job `hfov`) gives the vertical one from square pixels. On the ground the picture stands still: mean flow under 0.12 px
   (160 px wide) for 2 s, which took nothing of a flight for the ground on the gyro clip. Low over a slope the
   ground fills the frame and its parallax reads as a tilt: on a gyro clip flown low over dry hills, pan and roll
   still correlated 0.93 and 0.96, tilt 0.55, and 0.19-0.32 where under 0.6 of the tracks fit one rotation (1 s

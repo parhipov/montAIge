@@ -40,7 +40,7 @@ import cv2
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import butter, find_peaks, sosfiltfilt
+from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -150,6 +150,12 @@ W_SKILL, W_INT, W_SYNC, W_OFF, W_NEAR, W_HERO, NOISE = 4.0, 0.5, 1.5, 0.3, 2.0, 
 HIT_TOP, HIT_RATIO, HIT_ON_BEAT_S = 0.10, 1.8, 0.08
 HIT_SNAP, HIT_MOVE_MIN, HIT_MIN_BEATS, HIT_MIN_LONG, HIT_SPLITS, W_HIT = 2, 4, 6, 8, 1, 4.0
 HIT_ON, HIT_MIN, HIT_FULL, HIT_RAMP_W = [True], [HIT_MIN_BEATS], [1.0], 3.0
+# --booms: the hits are where the sub-bass (BOOM_BAND) comes in after a gap, BOOM_JUMP_DB over the BOOM_PRE_S before
+# the beat and within BOOM_LEVEL_DB of the track's loud sub-bass (90th percentile of the beats' peaks). A pop song
+# at 120 BPM (guitar, bass and drums) had its bass come in on the downbeats of bars 2-4 of every band phrase,
+# +31..+42 dB (the downbeat of bar 1 +16: the bass rings on into it); the mix's onset peaks found 1 of those, and
+# put their hits on the beat before (a strum), so cuts sat 0.5 s ahead of the boom: "cuts on the boom" (an owner)
+BOOMS, BOOM_BAND, BOOM_PRE_S, BOOM_JUMP_DB, BOOM_LEVEL_DB = [False], (30.0, 90.0), (0.25, 0.05), 20.0, 6.0
 # W_NEAR: footage close in time to a shot of another scene, exp(-gap / NEAR_TAU_S); at 8 s and 0.5 two
 # passes over the same warm-up 17 s apart (split files of one recording) opened the tennis "game" edit
 NEAR_TAU_S = 20.0
@@ -988,7 +994,8 @@ def beat_grid(env, times, bpm0):
     return best[1], best[2]
 
 
-def analyse_music(path, bpm_hint=None):
+def analyse_music(path, bpm_hint=None, booms=None):
+    """Beats, loudness and musical hits of a track; booms (default: --booms) takes the hits from the bass."""
     y = mus.load_audio(path)
     sr = mus.SR
     env, low, times, rate = mus.onset_envelope(y)
@@ -1012,7 +1019,20 @@ def analyse_music(path, bpm_hint=None):
     dphase = int(np.argmax([kick[p::4].mean() for p in range(4)]))   # downbeat: most kick
     return dict(path=path, duration=y.size / sr, bpm=bpm, period=P, beats=beats, loud=loud,
                 acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times,
-                hit=music_hits(env, times, beats))
+                hit=boom_hits(y, sr, beats) if (BOOMS[0] if booms is None else booms)
+                else music_hits(env, times, beats))
+
+
+def boom_hits(y, sr, beats):
+    """Per beat: the strength of a bass boom on it (its jump over BOOM_JUMP_DB, >= 1, at most 2), 0 elsewhere."""
+    f, t, Z = stft(y, fs=sr, nperseg=4096, noverlap=4096 - 256)
+    sub = (np.abs(Z[(f >= BOOM_BAND[0]) & (f < BOOM_BAND[1])]) ** 2).sum(0)
+    db = lambda a, b, fn: 10 * np.log10(fn(sub[(t >= a) & (t < b)]) + 1e-12) if ((t >= a) & (t < b)).any() else -120.0
+    peak = np.array([db(x - 0.03, x + 0.12, np.max) for x in beats])
+    pre = np.array([db(x - BOOM_PRE_S[0], x - BOOM_PRE_S[1], np.mean) for x in beats])
+    jump = peak - pre
+    boom = (jump >= BOOM_JUMP_DB) & (peak >= np.percentile(peak, 90) - BOOM_LEVEL_DB)
+    return np.where(boom, np.minimum(jump / BOOM_JUMP_DB, 2.0), 0.0)
 
 
 def music_hits(env, times, beats):
@@ -1064,6 +1084,8 @@ def phrase_layout(m):
     # phrase = 4 bars; its start phase (in bars) is where loudness jumps line up best
     pphase = int(np.argmax([jumps[(np.arange(len(jumps)) + 1) % 4 == p].sum() for p in range(4)]))
     start = d0 + 4 * pphase
+    if m.get('phrase_t0') is not None:                           # a shortened track keeps the whole one's phrases
+        start = int(np.argmin(np.abs(beats - m['phrase_t0'])))
     phrases, b = [], start
     while b + 16 <= nb:
         phrases.append(b)
@@ -2407,6 +2429,9 @@ def make_parser():
                          'the first chorus first; with --lively, 4-beat shots only there')
     ap.add_argument('--no-hits', action='store_true',
                     help='no cuts moved or added onto the musical hits, no W_HIT for motion onsets meeting them')
+    ap.add_argument('--booms', action='store_true',
+                    help='the musical hits are the bass booms: the sub-bass coming in after a gap (BOOM_*), not the '
+                         "mix's onset peaks")
     ap.add_argument('--heroes', type=int, default=0,
                     help='hero ramps (with --ramps) on this many of the biggest music lifts, never the same manoeuvre kind twice')
     ap.add_argument('--pace', action='store_true', help='loud phrases play 1.1-1.2x (BASE_SPEED_PACE): the flying looks faster')
@@ -2463,6 +2488,7 @@ def apply_options(a):
         TAIL_BEATS[0] = 16
         HIT_MIN[0] = HIT_MIN_LONG
     HIT_ON[0] = not a.no_hits
+    BOOMS[0] = a.booms
     if a.pace:
         BASE_SPEED.update(BASE_SPEED_PACE)
     if a.animals is not None:
@@ -2559,7 +2585,12 @@ def main():
                                        a.target)
         print(f'  shortened {m["duration"]:.1f}s -> {edit_info["seconds"]:.1f}s, phrases {edit_info["phrases"]}, '
               f'join cost {edit_info["jump_cost"]:.2f}')
+        # the cut is whole phrases of the track from 0 on, so its phrases start where the track's do; found again
+        # by loudness jumps, those of a song cut verse -> last chorus sat a bar late (2.2 s, not 0.2): the scene cut
+        # came 2 s into the chorus
+        t0 = float(m['beats'][phrases[0]])
         m = analyse_music(music_path, a.bpm)
+        m['phrase_t0'] = t0
     print(f'  {os.path.basename(music_path)}: {m["duration"]:.1f}s, {m["bpm"]:.2f} BPM, {m["beats"].size} beats, '
           f'downbeat phase {m["downbeat"]}')
     phrases, cls = phrase_layout(m)[:2]
@@ -2697,7 +2728,7 @@ def main():
         colour_match(flights, a.match, lut)
     if a.grade == 'auto':
         grade_all(scenes, flights, lut)
-    edl = dict(music=os.path.abspath(music_path), music_edit=edit_info, bpm=m['bpm'], seed=a.seed,
+    edl = dict(music=os.path.abspath(music_path), music_edit=edit_info, bpm=m['bpm'], seed=a.seed, booms=BOOMS[0],
                subject=a.subject or None, focus=bool(FOCUS[0]), zoom=a.zoom,
                lut=a.lut, sections=' '.join(sec), chorus=chorus,
                flights=[dict(idx=f.idx, original=f.src, render=f.stab, render_offset=f.offset,

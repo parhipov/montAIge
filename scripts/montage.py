@@ -24,7 +24,8 @@ paths in it); the job's name is its folder (or `name = ...`):
                                              # camera hears people, a drone its propellers)
     beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
     plain = ["snow up close"]                # what fills this footage without being a view (beauty.py --plain)
-    hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
+    hfov = 92                                # field of view of clips stabilized before (vis_motion.py; square
+                                             # pixels: the vertical one follows), when calibrating it WARNs
     args = ["--people", "4"]                 # edit.py options of every edit (before the edit's own)
 
     [who]                                    # main characters by example (people.py who, in `features`):
