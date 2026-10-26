@@ -120,6 +120,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   loudest); `--sections` puts the heroes and flying scenes on the chorus, the first one first, and with
   `--lively` the 4-beat shots only there.
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
+- Scene cuts that match: `--joins W` (e.g. 2: the camera turning on the same way, looking as high, as bright and
+  of the same colour across a scene cut; edit.py prints how many match either way).
 - The owner's picks: `--picked W` (clips the owner stabilized themselves, `_stabilized` without the original).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
   words, `beauty.py`; `plain = [...]` what fills the footage without being a view, e.g. snow up close): a

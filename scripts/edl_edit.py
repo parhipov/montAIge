@@ -175,7 +175,9 @@ def replace(e, ks, o, cache, clip=None):
                 if (day and f.day != day) or (clip and f.name.lower() != clip.lower()):
                     continue
                 r = edit.scene_dp(sc, f, pools, edit.rec_used(f, used, flights), rng, edit.look_penalty(f, seen),
-                                  moves, hero_used, edit.theme_penalty(f, shown))
+                                  moves, hero_used, edit.theme_penalty(f, shown),
+                                  (edit.cut_side(scenes, i - 1, flights, True),
+                                   edit.cut_side(scenes, i + 1, flights, False)))
                 if r is None:
                     continue
                 score = r[0] - edit.W_SAME_SCENE * sum(1 for x in nbr if flights[x].rec == f.rec)

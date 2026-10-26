@@ -189,6 +189,14 @@ which owners call beautiful: those come in as editor's pieces.
 - **Opening pieces and pickups:** an opening piece a little shorter than the opening phrase fills it at down to
   0.8x (a 12 s queue clip against a 14 s opening had gone to the second scene); a pickup under 1.5 s joins the
   first shot instead of flashing by.
+- **Scene cuts that match** (`--joins W`, from match cutting: DIRECT 2026, Netflix's Match Cutting 2023): inside
+  a scene the camera keeps turning across a cut; between scenes nothing held them together. A join is the mean of
+  four likenesses across the cut: turning on the same way (`continuity`), looking as high (15 deg), as bright (25
+  of 255) and of the same colour (Lab a/b of the look thumbnails, 8). A scene is scored against the neighbours
+  placed before it (scenes are placed by priority, not in order), so every cut is scored once. edit.py prints the
+  matching cuts always. On fpv2022 (late, 7 scene cuts): 3 matched (over 0.6) without it, mean 0.57; `--joins 2`
+  4, mean 0.66, piloting and hits as they were; `--joins 4` 5, mean 0.75, but the piloting median fell from 0.86
+  to 0.76. So 2.
 - **Distance in time:** footage close to another scene's shot pays `W_NEAR` (2, over 20 s); the parts of a
   split recording count as one flight (an edit once opened with two passes over the same warm-up 17 s apart).
 - **Themes** (`--theme "TEXT[:N]"`): a scene shows a theme when one of its shots averages 0.4 or more; once

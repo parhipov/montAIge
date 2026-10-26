@@ -199,6 +199,10 @@ CHAPTERS = []           # --chapters N,N,...: scenes per recording day in date o
 THEMES = []             # [(text, scenes allowed)]
 # scene: cuts inside it jump 1..12 s forward; continuity of rotation across them
 GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.0
+# --joins W: a scene cut whose two sides match pays W x join (0..1, the mean of): the camera turning on the same
+# way (continuity), looking as high (JOIN_ELEV deg apart), as bright (JOIN_BRIGHT of 255) and of the same colour
+# (JOIN_AB, Lab a/b of the look thumbnails), against the neighbour scenes placed before it; 0 = off
+W_JOIN, JOIN_ELEV, JOIN_BRIGHT, JOIN_AB, JOIN_GOOD = 0.0, 15.0, 25.0, 8.0, 0.6
 # speed ramps (relative to the shot's base speed) and the hero ramp
 RAMP_LO, RAMP_HI, ABS_LO, ABS_HI, W_SNAP, W_DEV = 0.7, 1.4, 0.5, 1.7, 1.0, 6.0
 PIECE_MAX_SPEED, PIECE_MIN_SPEED = ABS_HI, 0.8
@@ -1450,6 +1454,39 @@ def continuity(a, b):
     return 1.0 - np.linalg.norm(a - b, axis=-1) / (np.linalg.norm(a, axis=-1) + np.linalg.norm(b, axis=-1) + 20.0)
 
 
+def lab_mean(f):
+    """Mean Lab colour per frame from the look thumbnails (kept on the flight), or None."""
+    if getattr(f, 'lab', None) is None and f.look is not None:
+        step, th = f.look
+        lab = th.reshape(len(th), -1, 3).mean(1)
+        f.lab = np.stack([np.interp(np.arange(f.n), np.arange(len(th)) * step, lab[:, c]) for c in range(3)], 1)
+    return getattr(f, 'lab', None)
+
+
+def join(fa, ia, spa, fb, ib, spb):
+    """How alike the two sides of a cut are, 0..1 (see W_JOIN): frame ia of flight fa going out at speed spa,
+    frame ib of fb coming in at spb; either may be an array of frames."""
+    parts = [continuity(spa * fa.w_back[ia], spb * fb.w_fwd[ib]),
+             np.exp(-((fa.elev[ia] - fb.elev[ib]) / JOIN_ELEV) ** 2)]
+    if fa.flow is not None and fb.flow is not None:
+        parts.append(np.exp(-((fa.flow['bright'][ia] - fb.flow['bright'][ib]) / JOIN_BRIGHT) ** 2))
+    la, lb = lab_mean(fa), lab_mean(fb)
+    if la is not None and lb is not None:
+        parts.append(np.exp(-(np.linalg.norm(la[ia, 1:] - lb[ib, 1:], axis=-1) / JOIN_AB) ** 2))
+    return sum(parts) / len(parts)
+
+
+def cut_side(scenes, j, flights, out):
+    """(flight, frame, speed) of scene j at a scene cut, its last shot's end (out) or its first shot's start, once
+    the scene has its footage; else None."""
+    if not 0 <= j < len(scenes) or scenes[j].get('flight') is None:
+        return None
+    x = scenes[j]['shots'][-1 if out else 0]
+    if 'src_frame' not in x:
+        return None
+    return flights[x['flight']], x['src_frame'] + (x['src_frames'] - 1 if out else 0), x['speed']
+
+
 def source_frames(x, f):
     """Source frames a shot consumes at its base speed (hero shots: the hero ramp)."""
     L, P = x['nbeats'], 60.0 / x['bpm']
@@ -1459,8 +1496,9 @@ def source_frames(x, f):
     return int(round((x['t1'] - x['t0']) * x['speed'] * f.fps))
 
 
-def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), theme=None):
-    """Best start frames of all shots of a scene inside flight f, shots in forward order."""
+def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), theme=None, joins=(None, None)):
+    """Best start frames of all shots of a scene inside flight f, shots in forward order; joins: the neighbour
+    scenes' sides of its cuts (cut_side), for W_JOIN."""
     shots = scene['shots']
     ns = [source_frames(x, f) for x in shots]
     mu = scene.get('must')                                       # (flight, first frame, last frame, end at or None)
@@ -1471,6 +1509,10 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
              for k, (x, n) in enumerate(zip(shots, ns))]
     N = f.n
     idx = np.arange(N)
+    if W_JOIN and joins[0] is not None:                          # the cut in: the scene before goes out
+        nodes[0] = nodes[0] + W_JOIN * join(*joins[0], f, idx, shots[0]['speed'])
+    if W_JOIN and joins[1] is not None:                          # the cut out: the scene after comes in
+        nodes[-1] = nodes[-1] + W_JOIN * join(f, np.minimum(idx + ns[-1] - 1, N - 1), shots[-1]['speed'], *joins[1])
     gaps = np.arange(int(GAP_MIN_S * f.fps), int(GAP_MAX_S * f.fps) + 1, max(int(GAP_STEP_S * f.fps), 1))
     dp, backs = nodes[0], []
     for k in range(1, len(shots)):
@@ -1635,6 +1677,7 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
     for i in order:
         sc = scenes[i]
         nbr = [scenes[j].get('flight') for j in (i - 1, i + 1) if 0 <= j < len(scenes)]
+        joins = (cut_side(scenes, i - 1, flights, True), cut_side(scenes, i + 1, flights, False))
         best = None
         # the scene's own recording day first; if nothing fits there, the next day, then the previous one
         days = sorted({getattr(f, 'day', None) for f in flights} - {None})
@@ -1649,7 +1692,7 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
                 if sc.get('must') and sc['must'][0] != f.idx:
                     continue
                 r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng, look_penalty(f, seen), moves, hero_used,
-                             theme_penalty(f, shown))
+                             theme_penalty(f, shown), joins)
                 if r is None:
                     continue
                 score = r[0] - W_SAME_SCENE * sum(1 for x in nbr if x is not None and flights[x].rec == f.rec)
@@ -2087,6 +2130,9 @@ def make_parser():
     ap.add_argument('--ramps', action='store_true', help='bend speed inside shots (off: every frame at 1x)')
     ap.add_argument('--people', type=float, default=0.0, help='weight of people in the picture (YOLO); 4 = as much as piloting')
     ap.add_argument('--fly', type=int, default=0, help='flying scenes: this many phrases on the biggest lifts go to the best piloting')
+    ap.add_argument('--joins', type=float, default=0.0,
+                    help='weight of scene cuts that match (W_JOIN): the camera turning on the same way, looking as '
+                         'high, as bright and of the same colour across the cut, e.g. 2; default off')
     ap.add_argument('--must', action='append', default=[],
                     help='CLIP:SECONDS or CLIP:START-END, a moment or a piece the edit has to show (repeatable); '
                          '--must, --start and --end also take find:TEXT, e.g. "find:a corridor -> a staircase -> '
@@ -2165,7 +2211,7 @@ def make_parser():
 
 def apply_options(a):
     """The weights and switches of the command line, set where the scoring reads them; -> the noise generator."""
-    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED
+    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN
     SECTIONS[0] = a.sections
     if a.lively:
         if a.sections:
@@ -2194,7 +2240,7 @@ def apply_options(a):
     FOCUS_MIN[0] = a.focus_min
     PEER_TAGS[:] = ([t for t in (a.peers or '').split(',') if t and t != a.subject] +
                     ([a.subject + '_not'] if a.subject else []))
-    W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED = a.people, a.fly, a.beauty, a.picked
+    W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN = a.people, a.fly, a.beauty, a.picked, a.joins
     CARRIED[0] = a.carried
     if a.carried:
         SKILL_PARTS.pop('lean', None)
@@ -2341,6 +2387,10 @@ def main():
           f'animals in {sum(1 for x in shots if x.get("animal", 0) > 0.1)}')
     print(f'  piloting score of the edit: median {np.median([x["skill"] for x in shots]):.2f} (footage median 0.50); '
           f'hero ramps with a manoeuvre {len(heroes)}/{sum(s["hero"] for s in scenes)}')
+    jn = [join(*cut_side(scenes, i, flights, True), *cut_side(scenes, i + 1, flights, False))
+          for i in range(len(scenes) - 1)]
+    print(f'  scene cuts that match (join over {JOIN_GOOD}): {sum(j > JOIN_GOOD for j in jn)} of {len(jn)}, '
+          f'mean join {np.mean(jn) if jn else 0:.2f}' + ('' if W_JOIN else ' (--joins W asks for them)'))
     mv = [x['move'] for x in shots]
     run = best_run = 1
     for a_, b_ in zip(mv, mv[1:]):
