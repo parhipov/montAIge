@@ -101,13 +101,15 @@ def edit_options(a, extra, e):
 
 
 def new_speeds(x, f, scenes, o):
-    """Anchors of a new shot: ramped against the shots around it in the same clip (with --ramps), else 1x."""
-    if o.ramps and not o.no_ramps:
+    """Anchors of a new shot: ramped against the shots around it in the same clip (with --ramps; without, onto
+    the musical hits inside it, as edit.ramp_all does), else 1x."""
+    hits_only = not o.ramps
+    if not o.no_ramps and (o.ramps or (edit.HIT_ON[0] and x['hit'][1:].any())):
         lst = [y for s in scenes for y in s['shots'] if y['flight'] == f.idx and y is not x]
         mg = int(0.3 * f.fps)
         lo = max([y['src_frame'] + y['src_frames'] + mg for y in lst if y['src_frame'] < x['src_frame']], default=0)
         hi = min([y['src_frame'] - mg for y in lst if y['src_frame'] > x['src_frame']], default=f.n - 1)
-        anchors = edit.snap(x, f, lo, hi)
+        anchors = edit.snap(x, f, lo, hi, hits_only)
         if anchors is not None:
             x['anchors'] = [float(v) for v in anchors]
             x['anchor_t'] = np.linspace(0, x['t1'] - x['t0'], len(anchors)).tolist()
@@ -133,6 +135,7 @@ def replace(e, ks, o, cache, clip=None):
             a, n = x['b0'], x['nbeats']
             x['bpm'] = m['bpm']
             x['beat_w'] = acc[a:a + n] / (acc.mean() + 1e-9) + 0.5 * ((np.arange(a, a + n) - d0) % 4 == 0)
+            x['hit'] = m['hit'][a:a + n]
         scenes.append(s)
     pools = edit.Pools(flights)
     used = {f.idx: [] for f in flights}
@@ -197,7 +200,7 @@ def replace(e, ks, o, cache, clip=None):
     out = []
     for s in scenes:
         s = dict(s, must=bool(s.get('must')))
-        s['shots'] = [{k: v for k, v in x.items() if k not in ('beat_w', 'bpm')}
+        s['shots'] = [{k: v for k, v in x.items() if k not in ('beat_w', 'bpm', 'hit')}
                       | dict(src_t0=x['src_frame'] / flights[x['flight']].fps) for x in s['shots']]
         out.append(s)
     return dict(e, scenes=out)

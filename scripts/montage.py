@@ -27,6 +27,8 @@ paths in it); the job's name is its folder (or `name = ...`):
     bpm = 126
     target = 40                              # seconds, or "auto" for an edit about one person (--subject)
     series = true                            # keep the footage of the earlier series edits out (--avoid)
+    clips = ["GH01043*", "GH010440"]         # only these clips (names without extension, wildcards): one
+                                             # edit per place of an archive (places.py locations)
     args = ["--subject", "coach", "--focus",
             "--start", "find:a corridor -> a staircase -> an indoor tennis court"]
 
@@ -48,6 +50,7 @@ Steps:
 Main characters (people.py subject / who / split) are a job's own business: run them before `edits`.
 """
 import argparse
+import fnmatch
 import glob
 import os
 import subprocess
@@ -256,7 +259,22 @@ def check_edits(job):
             edit.make_parser().parse_args([e['music'], '-o', 'check.mp4'] + args)
         except SystemExit:
             raise SystemExit(f'{e["name"]}: edit.py does not take these options: {" ".join(args)}')
-        print(f'  {e["name"]}: {e["music"].rsplit("/", 1)[-1]}, {e.get("target", 60)} s, {" ".join(args)}')
+        clips = ''
+        if e.get('clips') and os.path.exists(os.path.join(job['_out'], 'originals.txt')):
+            clips = f', {len(edit_clips(job, e))} clips'
+        print(f'  {e["name"]}: {e["music"].rsplit("/", 1)[-1]}, {e.get("target", 60)} s{clips}, {" ".join(args)}')
+
+
+def edit_clips(job, e):
+    """The job's originals an edit's `clips` patterns take (names without extension, case ignored); a pattern
+    that takes nothing stops the job: a typo would quietly leave a place out."""
+    with open(os.path.join(job['_out'], 'originals.txt'), encoding='utf-8') as fh:
+        srcs = [x.strip() for x in fh if x.strip()]
+    stems = [os.path.splitext(os.path.basename(s))[0].lower() for s in srcs]
+    for p in e['clips']:
+        if not any(fnmatch.fnmatchcase(st, p.lower()) for st in stems):
+            raise SystemExit(f'{e["name"]}: clips pattern {p!r} takes no clip of the job')
+    return [s for s, st in zip(srcs, stems) if any(fnmatch.fnmatchcase(st, p.lower()) for p in e['clips'])]
 
 
 def edits(job, job_path, out, proxy, cache, plan_only=False):
@@ -274,7 +292,13 @@ def edits(job, job_path, out, proxy, cache, plan_only=False):
         fresh = os.path.exists(edl) and os.path.getmtime(edl) > os.path.getmtime(job_path) and \
             (plan_only or os.path.exists(dst))
         if not fresh:
-            cmd = [os.path.join(HERE, 'edit.py'), e['music'], '-o', dst, '--originals', os.path.join(out, 'originals.txt'),
+            originals = os.path.join(out, 'originals.txt')
+            if e.get('clips'):
+                os.makedirs(os.path.join(out, name), exist_ok=True)
+                originals = os.path.join(out, name, 'originals.txt')
+                with open(originals, 'w', encoding='utf-8') as fh:
+                    fh.write(''.join(s + '\n' for s in edit_clips(job, e)))
+            cmd = [os.path.join(HERE, 'edit.py'), e['music'], '-o', dst, '--originals', originals,
                    '--proxy-dir', proxy, '--cache', cache, '--target', target, '--height', 480, '--fps', 25]
             if e.get('bpm'):
                 cmd += ['--bpm', e['bpm']]
@@ -329,6 +353,7 @@ def main():
     os.chdir(ROOT)
     name = job.get('name') or os.path.basename(os.path.dirname(job_path))
     out = os.path.join('out', name)
+    job['_out'] = out
     proxy = os.path.join('out', 'diagnostics', 'proxy_' + name)
     cache = os.path.join('out', 'diagnostics', '.telemetry_cache')
     os.makedirs(out, exist_ok=True)

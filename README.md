@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
 ## What it does
 
 - Music: beat grid, bars, phrases and loudness of the track. The track is shortened by whole phrases to the
-  requested length; cuts fall on beats.
+  requested length; cuts fall on beats, and a strong hit in the music gets a cut or a manoeuvre.
 - Footage analysis, on your machine:
   - camera motion from the gyro track, if the camera records one (DJI, GoPro), or from the picture of a clip
     stabilized elsewhere whose gyro is gone: turns, dives, climbs, flips, close passes, a piloting score;

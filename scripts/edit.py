@@ -87,6 +87,21 @@ CINE_HEIGHT = 0.25
 
 # shot scores
 W_SKILL, W_INT, W_SYNC, W_OFF, W_NEAR, W_HERO, NOISE = 4.0, 0.5, 1.5, 0.3, 2.0, 6.0, 0.25
+# musical hits: "on a bang there must be a manoeuvre or a cut" (an owner). A hit is an onset peak among the
+# top HIT_TOP of the track's peaks and HIT_RATIO x the envelope around it (80th percentile within +-2 s), on a beat
+# (+-HIT_ON_BEAT_S). An orchestral track at 130 BPM: 29 in 97 s, often in pairs two beats apart (the last half bar
+# of a phrase and its downbeat) or every other beat; with cuts on phrases only, 20 of 29 met neither a cut nor a
+# motion onset. So a cut
+# within HIT_SNAP beats of a hit moves onto it (shots keep HIT_MOVE_MIN beats); a shot is cut at a hit inside it
+# when both parts keep HIT_MIN_BEATS (HIT_MIN_LONG with --long), at most HIT_SPLITS times a scene; every hit left
+# inside a shot pays W_HIT x how well a motion onset meets it (HIT_FULL: the footage's median onset meets it fully).
+# That left 7 of 25 on nothing there, mostly the first of a pair (the cut is on the second, two beats are too
+# short a shot); W_HIT 8 left 6 and took the piloting median from 0.87 to 0.76. So without --ramps a shot with a hit
+# inside bends its speed (snap, within RAMP_LO..RAMP_HI) to put an onset there, HIT_RAMP_W x the hit as the bonus,
+# and plays at constant speed elsewhere
+HIT_TOP, HIT_RATIO, HIT_ON_BEAT_S = 0.10, 1.8, 0.08
+HIT_SNAP, HIT_MOVE_MIN, HIT_MIN_BEATS, HIT_MIN_LONG, HIT_SPLITS, W_HIT = 2, 4, 6, 8, 1, 4.0
+HIT_ON, HIT_MIN, HIT_FULL, HIT_RAMP_W = [True], [HIT_MIN_BEATS], [1.0], 3.0
 # W_NEAR: footage close in time to a shot of another scene, exp(-gap / NEAR_TAU_S); at 8 s and 0.5 two
 # passes over the same warm-up 17 s apart (split files of one recording) opened the tennis "game" edit
 NEAR_TAU_S = 20.0
@@ -146,6 +161,9 @@ THEME_MIN_S = 2.0       # a shot this short does not use up a theme's scenes (a 
 # W_BEAUTY x its view everywhere; in a people edit a beautiful view excuses a shot with nobody in it (W_EMPTY x
 # (1 - view)); the cinematic piloting score (quiet music) takes CINE_VIEW of the view
 W_BEAUTY, CINE_VIEW = 0.0, 0.3
+# the owner's picks (--picked W): a clip the owner stabilized before (a `_stabilized` export without its original)
+# was chosen out of the shoot ("I didn't stabilize them for nothing"); every window of one pays W_PICKED
+W_PICKED = 0.0
 CHAPTERS = []           # --chapters N,N,...: scenes per recording day in date order, instead of chapters() sharing them
 THEMES = []             # [(text, scenes allowed)]
 # scene: cuts inside it jump 1..12 s forward; continuity of rotation across them
@@ -819,7 +837,27 @@ def analyse_music(path, bpm_hint=None):
     busy = np.array([env[a:max(b, a + 1)].mean() for a, b in zip(tb[:-1], tb[1:])])
     dphase = int(np.argmax([kick[p::4].mean() for p in range(4)]))   # downbeat: most kick
     return dict(path=path, duration=y.size / sr, bpm=bpm, period=P, beats=beats, loud=loud,
-                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times)
+                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times,
+                hit=music_hits(env, times, beats))
+
+
+def music_hits(env, times, beats):
+    """Per beat: the strength of a musical hit on it (its peak over the HIT_TOP threshold, >= 1), 0 elsewhere."""
+    rate = 1.0 / np.median(np.diff(times))
+    pk, _ = find_peaks(env, distance=max(int(0.2 * rate), 1))
+    hit = np.zeros(beats.size)
+    if pk.size < 10:
+        return hit
+    v = env[pk]
+    w, gap = int(2 * rate), max(int(0.1 * rate), 1)
+    ctx = np.array([np.percentile(np.r_[env[max(p - w, 0):max(p - gap, 0)], env[p + gap:p + w], 0.0], 80)
+                    for p in pk])
+    top = np.percentile(v, 100 * (1 - HIT_TOP))
+    for p, vv, c in zip(pk, v, ctx):
+        j = int(np.argmin(np.abs(beats - times[p])))
+        if vv >= top and vv >= HIT_RATIO * c and abs(beats[j] - times[p]) < HIT_ON_BEAT_S:
+            hit[j] = max(hit[j], vv / top)
+    return hit
 
 
 PATTERNS = {        # beats per shot inside a 16-beat phrase: one-minute people edit, 8-beat shots
@@ -834,6 +872,10 @@ PATTERNS_LIVELY = {     # --lively: short lively edits (kids at play), never sho
     2: [[4, 4, 4, 4], [8, 4, 4]],
     3: [[4, 4, 4, 4]],
 }
+# --long: whole flights, a shot per phrase (a calm report where every view is beautiful: a kremlin from above,
+# "longer flights, everything there is beautiful"); the tail after the last phrase in shots of TAIL_BEATS
+PATTERNS_LONG = {c: [[16]] for c in range(4)}
+TAIL_BEATS = [8]
 
 
 def phrase_layout(m):
@@ -863,6 +905,40 @@ def phrase_layout(m):
     return phrases, cls, start, quiet_db, beat_energy
 
 
+def hit_cuts(scenes, hit, nb, shot):
+    """Cuts onto the musical hits (see HIT_SNAP): a cut within HIT_SNAP beats of a hit moves onto it, then a shot
+    with a hit inside is cut there if both parts keep HIT_MIN[0] beats, at most HIT_SPLITS times a scene."""
+    if not hit.any():
+        return
+    bounds = [[x['b0'], si] for si, s in enumerate(scenes) for x in s['shots']]
+    last = scenes[-1]['shots'][-1]
+    end = last['b0'] + last['nbeats']
+    taken = {b for b, _ in bounds}
+    for k in range(1, len(bounds)):
+        b = bounds[k][0]
+        if hit[b] > 0:
+            continue
+        lo = bounds[k - 1][0] + HIT_MOVE_MIN
+        hi = (bounds[k + 1][0] if k + 1 < len(bounds) else end) - HIT_MOVE_MIN
+        cand = [h for h in range(max(b - HIT_SNAP, lo), min(b + HIT_SNAP, hi) + 1) if hit[h] > 0 and h not in taken]
+        if cand:
+            h = max(cand, key=lambda h: (hit[h], -abs(h - b)))
+            taken.discard(b)
+            taken.add(h)
+            bounds[k][0] = h
+    for si, s in enumerate(scenes):
+        own = sorted(b for b, i in bounds if i == si)
+        nxt = min([b for b, i in bounds if i > si], default=end)
+        for _ in range(HIT_SPLITS):
+            edges = own + [nxt]
+            cand = [h for a, e in zip(edges[:-1], edges[1:]) for h in range(a + HIT_MIN[0], e - HIT_MIN[0] + 1)
+                    if hit[h] > 0]
+            if not cand:
+                break
+            own = sorted(own + [max(cand, key=lambda h: hit[h])])
+        s['shots'] = [shot(a, e - a, s['cls']) for a, e in zip(own, own[1:] + [nxt])]
+
+
 def plan_scenes(m, rng):
     beats, nb, loud = m['beats'], len(m['beats']), m['loud']
     phrases, cls, start, quiet_db, beat_energy = phrase_layout(m)
@@ -875,7 +951,7 @@ def plan_scenes(m, rng):
         w = m['acc'][a:a + n] / (m['acc'].mean() + 1e-9)
         w = w + 0.5 * ((np.arange(a, a + n) - d0) % 4 == 0)       # downbeats matter more
         return dict(b0=a, nbeats=n, cls=int(c), t0=t0, t1=t1, speed=BASE_SPEED[int(c)],
-                    energy=float(beat_energy[a:a + n].mean()), beat_w=w)
+                    energy=float(beat_energy[a:a + n].mean()), beat_w=w, hit=m['hit'][a:a + n])
 
     scenes = []
     if start > 0:                                                # pickup before the first phrase
@@ -892,13 +968,15 @@ def plan_scenes(m, rng):
     if tail > 0:
         sh, a = [], nb - tail
         while a < nb:
-            L = min(nb - a, 8)
+            L = min(nb - a, TAIL_BEATS[0])
             sh.append(shot(a, L, cls[-1] if len(cls) else 1))
             a += L
         scenes.append(dict(kind='tail', cls=int(cls[-1]) if len(cls) else 1, shots=sh))
     if END_SET[0] and len(scenes[-1]['shots']) > 1:              # the editor's ending is a scene of its own
         last = scenes[-1]['shots'].pop()
         scenes.append(dict(kind='end', cls=scenes[-1]['cls'], shots=[last]))
+    if HIT_ON[0]:
+        hit_cuts(scenes, m['hit'], nb, shot)
     # hero: at most MAX_HEROES, where the music lifts the most (coming back after a breakdown first)
     lifts = []
     for i, s in enumerate(scenes):
@@ -1134,8 +1212,16 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
     sync /= sh['nbeats']
     off = np.maximum(f.ca[s + n] - f.ca[s] - on_beat, 0) / sh['nbeats']
     sc = (W_SKILL * qs - W_INT * np.abs(qw - sh['q_music']) + W_SYNC * sync - W_OFF * off - W_NEAR * near)
+    hw = sh.get('hit')
+    if W_HIT and HIT_ON[0] and hw is not None and hw[1:].any():  # hits inside the shot (its first beat is the cut)
+        cov = np.zeros(s.size)
+        for j in np.flatnonzero(hw[1:]) + 1:
+            cov += hw[j] * np.clip(f.accent_wide[np.minimum(s + offs[j], N - 1)] / HIT_FULL[0], 0, 1)
+        sc += W_HIT * cov / hw[1:].sum()
     vw = (f.cvw[s + n] - f.cvw[s]) / n if W_BEAUTY and hasattr(f, 'cvw') else np.zeros(s.size)
     sc += W_BEAUTY * vw
+    if W_PICKED and stabilized_before(f.src):
+        sc += W_PICKED
     if fly:
         sc += W_FLY * qs
     elif W_PEOPLE and hasattr(f, 'cp'):
@@ -1218,7 +1304,7 @@ def merged(shots):
     x = dict(shots[0])
     x.update(nbeats=sum(s['nbeats'] for s in shots), t1=shots[-1]['t1'],
              energy=float(np.mean([s['energy'] for s in shots])),
-             beat_w=np.concatenate([s['beat_w'] for s in shots]))
+             beat_w=np.concatenate([s['beat_w'] for s in shots]), hit=np.concatenate([s['hit'] for s in shots]))
     return x
 
 
@@ -1489,8 +1575,8 @@ def take(sc, f, starts, ns, pools, used, seen, moves, hero_used, shown):
 
 
 # ================================================================ speed ramps
-def snap(sh, f, lo, hi):
-    """Bend playback speed inside a shot so motion onsets land on beats.
+def snap(sh, f, lo, hi, hits_only=False):
+    """Bend playback speed inside a shot so motion onsets land on beats (hits_only: on its musical hits only).
 
     Anchors at every beat; anchor 0 is the cut (fixed), the others pick either
     their nominal frame or a motion onset in reach, first-order DP over beats.
@@ -1507,11 +1593,11 @@ def snap(sh, f, lo, hi):
     cands = [[(float(s), 0.0)]]
     for j in range(1, L + 1):
         c = [(nominal[j], 0.0)]
-        if j < L:
+        if j < L and (not hits_only or sh['hit'][j] > 0):
             r0, r1 = s + vmin * bf * j, s + vmax * bf * j
             for p, h in zip(pk, f.peak_strength):
                 if r0 <= p <= r1:
-                    c.append((float(p), W_SNAP * h * sh['beat_w'][j]))
+                    c.append((float(p), W_SNAP * h * (HIT_RAMP_W * sh['hit'][j] if hits_only else sh['beat_w'][j])))
         else:
             c += [(s + v * bf * L, 0.0) for v in np.linspace(vmin, vmax, 9)]
         cands.append(c)
@@ -1561,7 +1647,9 @@ def hero_ramp(sh, f):
     return np.array(x)
 
 
-def ramp_all(scenes, flights):
+def ramp_all(scenes, flights, hits_only=False):
+    """Speed ramps (--ramps): onsets on beats, the hero ramps. hits_only (the default without --ramps): a shot
+    with a musical hit inside bends only to put a motion onset on it, every other shot plays at constant speed."""
     shots = [x for s in scenes for x in s['shots']]
     by = {}
     for x in shots:
@@ -1573,10 +1661,10 @@ def ramp_all(scenes, flights):
         for k, x in enumerate(lst):
             lo = lst[k - 1]['src_frame'] + lst[k - 1]['src_frames'] + mg if k else 0
             hi = lst[k + 1]['src_frame'] - mg if k + 1 < len(lst) else f.n - 1
-            anchors = hero_ramp(x, f) if x['hero_ramp'] else None
+            anchors = hero_ramp(x, f) if x['hero_ramp'] and not hits_only else None
             if anchors is None:
                 x['hero_ramp'] = False
-                anchors = snap(x, f, lo, hi)
+                anchors = snap(x, f, lo, hi, hits_only) if not hits_only or x['hit'][1:].any() else None
             if anchors is None:
                 constant_speed(x)
                 continue
@@ -1609,6 +1697,25 @@ def sync_stats(scenes, flights, m):
         tot += tt.size
         on += int((d < 0.04).sum())
     return on, tot
+
+
+def hit_stats(scenes, flights, m, reach=0.1):
+    """Musical hits met by a cut, by a motion onset of at least half the median strength (within reach s), or
+    by nothing."""
+    th = m['beats'][m['hit'] > 0]
+    shots = [x for s in scenes for x in s['shots']]
+    cuts = np.array([x['t0'] for x in shots[1:]])
+    ons = []
+    for x in shots:
+        f = flights[x['flight']]
+        a, b = x['anchors'][0], x['anchors'][-1]
+        sel = (f.peak_frames >= a) & (f.peak_frames < b) & (f.peak_strength >= 0.5 * HIT_FULL[0])
+        uu = np.linspace(0, x['t1'] - x['t0'], 400)
+        ons += list(x['t0'] + np.interp(f.peak_frames[sel], time_map(x)(uu), uu))
+    ons = np.array(ons)
+    on_cut = np.array([cuts.size > 0 and np.abs(cuts - t).min() < reach for t in th], bool)
+    on_move = np.array([ons.size > 0 and np.abs(ons - t).min() < reach for t in th], bool)
+    return th.size, int(on_cut.sum()), int((on_move & ~on_cut).sum()), int((~on_cut & ~on_move).sum())
 
 
 def plot_plan(scenes, flights, m, path):
@@ -1870,6 +1977,9 @@ def make_parser():
                          'character (other children of the series); <subject>_not is always one')
     ap.add_argument('--focus', action='store_true', help='an edit about the --subject: others count FOCUS_OTHERS')
     ap.add_argument('--lively', action='store_true', help='4-beat shots in loud phrases (PATTERNS_LIVELY)')
+    ap.add_argument('--long', action='store_true', help='a shot per 16-beat phrase: whole flights (PATTERNS_LONG)')
+    ap.add_argument('--no-hits', action='store_true',
+                    help='no cuts moved or added onto the musical hits, no W_HIT for motion onsets meeting them')
     ap.add_argument('--heroes', type=int, default=0,
                     help='hero ramps (with --ramps) on this many of the biggest music lifts, never the same manoeuvre kind twice')
     ap.add_argument('--pace', action='store_true', help='loud phrases play 1.1-1.2x (BASE_SPEED_PACE): the flying looks faster')
@@ -1885,6 +1995,9 @@ def make_parser():
     ap.add_argument('--chapters', default=None,
                     help='scenes per recording day in date order, e.g. 3,2,4,2 (0 leaves a day out); default: in '
                          'proportion to good flying (and beautiful views with --beauty)')
+    ap.add_argument('--picked', type=float, default=0.0,
+                    help='weight of the clips the owner stabilized before (a `_stabilized` export without its '
+                         'original): the owner\'s own picks; 2 = half the piloting range')
     ap.add_argument('--theme', action='append', default=[],
                     help='"TEXT[:N]", what the edit shows in words (repeatable): at most N scenes of it (default 1), '
                          'e.g. "a man on a ladder repairing a roof" when one activity fills the footage')
@@ -1899,9 +2012,14 @@ def make_parser():
 
 def apply_options(a):
     """The weights and switches of the command line, set where the scoring reads them; -> the noise generator."""
-    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY
+    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED
     if a.lively:
         PATTERNS.update(PATTERNS_LIVELY)
+    if a.long:
+        PATTERNS.update(PATTERNS_LONG)
+        TAIL_BEATS[0] = 16
+        HIT_MIN[0] = HIT_MIN_LONG
+    HIT_ON[0] = not a.no_hits
     if a.pace:
         BASE_SPEED.update(BASE_SPEED_PACE)
     if a.animals is not None:
@@ -1918,7 +2036,7 @@ def apply_options(a):
     FOCUS[0] = a.focus and bool(a.subject)
     PEER_TAGS[:] = ([t for t in (a.peers or '').split(',') if t and t != a.subject] +
                     ([a.subject + '_not'] if a.subject else []))
-    W_PEOPLE, MAX_FLY, W_BEAUTY = a.people, a.fly, a.beauty
+    W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED = a.people, a.fly, a.beauty, a.picked
     CHAPTERS[:] = [int(v) for v in a.chapters.split(',')] if a.chapters else []
     END_SET[0] = a.end is not None
     return np.random.default_rng(a.seed) if a.seed is not None else None
@@ -1932,6 +2050,8 @@ def prepare_flights(flights, a):
         set_beauty(flights)
     if THEMES:
         load_themes(flights, a.clip_cache)
+    st = np.concatenate([f.peak_strength for f in flights])
+    HIT_FULL[0] = float(np.median(st)) if st.size else 1.0
 
 
 def main():
@@ -2020,11 +2140,11 @@ def main():
         print(f'  footage taken by {len(a.avoid)} earlier edits: '
               f'{sum(b - a_ for v in avoid.values() for a_, b in v) / flights[0].fps:.0f}s')
     scenes = assign(scenes, flights, m, rng, musts, avoid)
-    if a.no_ramps or not a.ramps:
+    if a.no_ramps or (not a.ramps and not HIT_ON[0]):
         for x in (x for s in scenes for x in s['shots']):
             constant_speed(x)
     else:
-        ramp_all(scenes, flights)
+        ramp_all(scenes, flights, hits_only=not a.ramps)
     shots = [x for s in scenes for x in s['shots']]
     sw = sum(1 for p, q in zip(scenes, scenes[1:]) if p['flight'] != q['flight'])
     on, tot = sync_stats(scenes, flights, m)
@@ -2064,6 +2184,9 @@ def main():
             f'{t} {sum(any(x.get("theme") == t for x in s["shots"]) for s in scenes)}/{c}' for t, c in THEMES))
     print(f'  motion onsets in the edit: {tot}, on a beat (+-40 ms): {on} ({on / max(tot, 1) * 100:.0f}%)  '
           f'({time.time() - t0:.0f}s)')
+    nh, hc, hm, h0 = hit_stats(scenes, flights, m)
+    print(f'  musical hits: {nh}, on a cut {hc}, on a motion onset {hm}, on nothing {h0}'
+          + ('' if HIT_ON[0] else ' (--no-hits)'))
     lut = CubeLUT(a.lut) if a.lut else None
     if a.grade == 'auto':
         grade_all(scenes, flights, lut)
@@ -2075,7 +2198,7 @@ def main():
                scenes=[dict(idx=s['idx'], kind=s['kind'], cls=s['cls'], hero=s['hero'], slow_hero=s['slow_hero'], fly=s['fly'],
                             must=bool(s.get('must')),
                             flight=s['flight'], day=s.get('day'),
-                            shots=[{k: v for k, v in x.items() if k not in ('beat_w', 'bpm')}
+                            shots=[{k: v for k, v in x.items() if k not in ('beat_w', 'bpm', 'hit')}
                                    | dict(src_t0=x['src_frame'] / flights[x['flight']].fps) for x in s['shots']])
                        for s in scenes])
     with open(base + '_edl.json', 'w', encoding='utf-8') as fh:

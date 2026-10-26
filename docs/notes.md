@@ -115,6 +115,18 @@ which owners call beautiful: those come in as editor's pieces.
 
 - **Scenes:** one clip per 16-beat phrase; shots inside jump 1-12 s forward, chosen together by a DP. Inside
   a scene the camera keeps turning the same way across a cut (continuity 0.76 against 0.48 for random pairs).
+- **Musical hits:** "on a bang there must be a manoeuvre or a cut". A hit is an onset peak in the top 10 % of the
+  track's peaks and 1.8x the envelope around it (80th percentile within ±2 s), on a beat (±80 ms). An orchestral
+  track at 130 BPM had 29 in 97 s, often in pairs two beats apart (the last half bar of a phrase and its downbeat)
+  or every other beat; with cuts on phrases only, 20 met neither a cut nor a motion onset. Now a cut within 2 beats
+  of a hit moves onto it (shots keep 4 beats), a shot is cut at a hit inside it if both parts keep 6 beats (8 with
+  `--long`), and a hit left inside a shot pays `W_HIT` 4 x how well a motion onset meets it: 4 of 25 on-beat hits
+  on nothing, piloting median unchanged (0.87). `W_HIT` 8 left 6 and took the median to 0.76: the footage has no
+  onset there, so a shot with a hit inside bends its speed (0.7-1.4x) to put one on it, and plays at 1x
+  elsewhere (most such shots 0.97-1.03x). Another track (120 BPM) had 10 of 15 hits between beats: those wait for
+  cuts on half beats.
+- **Long flights** (`--long`): a shot per 16-beat phrase, for a calm report where every view is beautiful (a
+  kremlin from above, "longer flights: everything there is beautiful").
 - **Speed:** ramps bend speed between 0.7x and 1.4x through beat anchors so onsets land on beats (sync from
   44 % to 71 % on the first test; read as "breathing" by some, hence off by default). The hero ramp: beat 0
   rushes in at 1.4x, beats 1-2 at 0.5x with the manoeuvre on beat 2, then base speed; at most 2, where the
@@ -193,6 +205,12 @@ which owners call beautiful: those come in as editor's pieces.
 - **Search and routes:** softmax over the asked places and alternatives; a route is a stretch of each place
   in order within `--within` s ("a corridor → a staircase → a tennis court" found the flight the owner
   remembered, in a few seconds).
+- **One edit per place:** an archive of several trips gets an edit per place, each with its own `clips` in the
+  job file. The picture alone put four places 5-25 km apart into one group (autumn birches and water everywhere);
+  the GPS told them apart.
+- **Light is not a place:** a theme "a sunset over a town" also took a kremlin wall in the low sun for a sunset and
+  left that whole flight out; extra sunset scenes were found again in daytime footage with `edl_edit.py
+  --replace K --clip CLIP`, choosing the clip whose motion met the same musical hits.
 - **Locations:** two clips are alike when the views of each are found in the other (median best cosine, both
   ways); average linkage joins at 0.83. Three shoots mixed (28 clips): pairs of one place 0.85-0.96, of
   different places 0.80 at most.
@@ -203,6 +221,9 @@ which owners call beautiful: those come in as editor's pieces.
 - **Where it was** (`gps.py`): a place named from the picture is a guess. A turquoise river in a canyon read as
   the Sulak canyon by eye and by CLIP; the GoPro's GPS (GPMF GPS5) put it 30 km south, on the Avar Koysu by the
   Irganay reservoir. Check names against the GPS before captions or a title. ([dagestan](examples/dagestan.md))
+- **The owner's picks** (`--picked W`): a clip the owner stabilized themselves and kept without its original was
+  chosen out of the shoot ("I didn't stabilize them for nothing"); every window of one pays W (2: half the
+  piloting range). At 2 they got 5 to 8 of the 13-19 shots of each edit of one archive.
 - **Old exports** (`exports.py`): centre thumbnails at 10 Hz, aspect matched, best correlation over every
   offset; pieces that run on in the same original merge. A 35 s export was found at 72.8-107.8 s (0.84
   against 0.13); a whole-clip export is reported as a copy, not a pick.
@@ -254,6 +275,9 @@ against video length, dark frames, frozen frames, brightness jumps at cuts.
 - An absolute horizon for motion from the picture (sky and ground, or a regression of the camera angle on the
   CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.
 - Tracks without a constant tempo: a neural beat tracker (Beat This!), drum stems for cleaner accents.
+- Cuts on half beats, for musical hits between beats (two thirds of the hits of one track).
+- Scenes in the order of recording within a day (day, evening, sunset): a sunset placed between daytime scenes
+  had to be swapped out by hand.
 - Slow motion in finals: frame interpolation, or 100 fps sources.
 - Pick the best of N seeds by skill, sync and variety.
 - Trick types from the gyro axes (flip, roll, power loop, split-S); flips on snares, rolls on fills.

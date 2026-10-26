@@ -20,7 +20,11 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 ## How we work
 
 - Short edits: about a minute ("nobody watches long"). Shots of 8 beats for people, 8 to 16 for calm
-  reports; never chop into tiny pieces (at 145 BPM even 4 beats is 1.7 s).
+  reports (`--long`: whole flights, a shot per phrase); never chop into tiny pieces (at 145 BPM even 4 beats is
+  1.7 s).
+- A strong hit in the music gets a cut or a manoeuvre: `edit.py` moves cuts onto the hits, picks footage whose
+  motion meets them and bends speed onto them; read its `musical hits:` line (on a cut / on a motion onset / on
+  nothing).
 - Previews first: 640 px, 25 fps is enough to judge. 4K only when asked.
 - Scripts perceive, you decide. Checkers write per-frame numbers to `.npz` and print a few summary lines.
   Look at pictures only on a WARN, once when a detector meets new footage (`pilot_check.jpg`,
@@ -36,7 +40,9 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   (`people.py who`). A few wrong people in the picks are fine; do not tighten thresholds until a person is lost.
 - No flights to nowhere: in a people edit, footage with nobody in it belongs only to flying scenes built
   around a manoeuvre. With little footage, a shorter edit is better than filler.
-- Read the footage folder first: the owner's old exports are often the best moments (`exports.py`).
+- Read the footage folder first: the owner's old exports are often the best moments (`exports.py`), and clips
+  the owner stabilized themselves are their picks (`--picked`).
+- An archive of several places: one edit per place (`places.py locations`, the GPS), each with its `clips`.
 - Variants differ by idea (track, pacing, opening); spread the best moments across them.
 - Split DJI recordings: ask the owner before joining (`montage.py --join` renames the parts).
 - Propellers or a lens guard in view after stabilization are framing: Gyroflow's zoom, or `--zoom`. Horizon
@@ -82,6 +88,7 @@ music = "models/music/tennis/Motivator.mp3"
 bpm = 126
 target = 40                                       # seconds, or "auto" for an edit about one person
 series = true                                     # keeps the footage of earlier series edits out
+clips = ["GH01043*", "GH010440"]                  # only these clips (names, wildcards): one edit per place
 args = ["--subject", "coach", "--focus",
         "--start", "find:a corridor -> a staircase -> an indoor tennis court"]
 ```
@@ -91,7 +98,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 
 ## edit.py options
 
-- Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`.
+- Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`,
+  `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the musical hits).
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` with `--focus` (an edit about one person), `--minor TAG` (another
   edit's main character counts like the pilot), `--peers` (look-alikes that must not stand in), `--avoid
@@ -100,6 +108,7 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
   in loud phrases), `--want KIND` (e.g. `ascent`), `--arcs N` (whole climbs and descents).
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
+- The owner's picks: `--picked W` (clips the owner stabilized themselves, `_stabilized` without the original).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
   words, `beauty.py`): a beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
 - Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty). Landings
