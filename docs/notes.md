@@ -76,6 +76,18 @@ renders (same frame count as the original), telemetry from the original.
   Trusted: 57-89 % of the owner's five exports, least where they flew low over hillsides.
 - **Movement signature** per frame: dive, pull-up, pitch-down, turn left, turn right, roll, close pass,
   cruise. A shot that moves like one placed within ~25 s of music pays `W_MOVE` (cosine above 0.6).
+- **A carried camera** (`camera = "carried"`, `--carried`: in a hand or on a helmet, skiing): nobody pilots it,
+  so there is no pilot to find (every skier wears goggles and holds poles in front), no landing, and the pitch is
+  where the head looks: no lean in the piloting score, no dives or pull-ups. A helmet looking at its skis shows
+  snow and a shadow: such shots were 40-45° down against −8..+8° for the views and −29° for a skier up close,
+  so 30-40° down pays `W_GROUND`. Clips lose 1 s at each end (a button), not the 3 s and 5 s of a flight: a 13 s
+  clip of us in a lift queue had kept 5 s. ([arkhyz](examples/arkhyz.md))
+- **GPS speed and climb** (`gps.py track`, GPS5/GPS9 every ~18th of a second): what a carried camera's action
+  is. `--speed W` puts the ground speed into the piloting score (ranked over all footage, the middle rank where
+  there is no fix). The climb tells a lift from a run: of 66 min of a ski holiday, one chairlift ride rose
+  (+0.8 m/s for 30 s); CLIP's "a chairlift" took 142 s of runs under a lift line for one. The first fixes after
+  power-on can be far off (127 m of altitude for 1671 m a second later, DOP 4.9): a jump within the first 3 s
+  drops what came before it.
 
 ## The picture
 
@@ -150,7 +162,12 @@ which owners call beautiful: those come in as editor's pieces.
   track is shortened along another path, the scenes per day shared anew), and cutting a scene's phrase out of
   the track moves every later scene off its beats. So the music stays: `--replace K` finds scene K again
   against the rest as it stands; `--end-from K` lets the ending take over from scene K (earlier in its clip,
-  at 1x, to the same last frame).
+  at 1x, to the same last frame). "Add Marina to the one I liked": planning again with her as a `--must`
+  dropped the opening the owner had liked, so the edit he had seen was rebuilt (same options, deterministic)
+  and its weakest scene replaced by her clip (`--replace K --clip`). ([arkhyz](examples/arkhyz.md))
+- **Opening pieces and pickups:** an opening piece a little shorter than the opening phrase fills it at down to
+  0.8x (a 12 s queue clip against a 14 s opening had gone to the second scene); a pickup under 1.5 s joins the
+  first shot instead of flashing by.
 - **Distance in time:** footage close to another scene's shot pays `W_NEAR` (2, over 20 s); the parts of a
   split recording count as one flight (an edit once opened with two passes over the same warm-up 17 s apart).
 - **Themes** (`--theme "TEXT[:N]"`): a scene shows a theme when one of its shots averages 0.4 or more; once
@@ -190,12 +207,29 @@ which owners call beautiful: those come in as editor's pieces.
   0.03 lead; at 0.84 two of five children were left with almost nothing. A label follows a track only to rows
   that still look most like that person. At 640 px it cannot carry the pilot by look: everyone in jeans and
   blue matched, negatives included. `split --k 3` groups one label by look to drop look-alikes.
+- **From a screenshot, along tracks** (`people.py track`, then `who`): a crisp 4K screenshot against 640 px crops
+  of skiers matched every skier in blue (a woman "in view" 1608 s of 66 min); her best match was 0.84, any
+  skier's 0.80, so no threshold worked. Now the screenshot is found in the footage (CLIP over the person rows,
+  then the picture: the person and the whole screenshot laid over the frame, on every frame within 0.4 s, from
+  0.6; the person alone took a stranger in blue at 0.56), and that person's track becomes the reference: many
+  views at the footage's own size and blur. Tracks: BoT-SORT on every other frame, its sparse-flow motion
+  compensation keeping ids while the camera skis (1600 tracks over 66 min, 94 % of rows in one; ~1.4x real
+  time per process, CPU-bound). People in view at the same moments as a known person are somebody else, for
+  free. A whole track goes to a person by the median of its readable rows (pose sure of a body, shoulders and
+  hips seen, 8 % of the frame high: skis and snowboards up close had passed for people), at 0.85 at least and
+  ahead of the others; CLIP and the colours of the clothes together (CLIP alone took children in pink and
+  orange for a woman in turquoise and red trousers, half her rows; with the colours ~3 of 4 rows were right).
+  A close selfie screenshot was not in the footage (0.51): kept as an image reference.
+- **Somebody filming is not in the picture:** the woman with ~60 s in view held the camera most of the time; on
+  the chairlift "we are on it, filming down": the detector finds nobody, the GPS climb finds the ride.
 - **Faces** (`faces.py`): two children in the same printed T-shirt are told apart only by face. Eyes are
   ~3 px apart in the renders and ~20 in the 4K originals, so faces are read there (YOLO-pose at 1280 px,
   aligned on eyes and nose, SFace), the frame matched to the render by an ORB homography; one reference face
   sorted 142 faces. Reading 4K by seeking took 35 min; reading on between near samples and caching is the fix.
 - **An edit about one person** (`--focus`): a shot is the person, a group with them, or a cutaway (adults,
-  the place), never another child of the same kind instead of them (`--peers`, `W_IMPOSTOR`).
+  the place), never another child of the same kind instead of them (`--peers`, `W_IMPOSTOR`). Several people
+  are one subject as `--subject a+b+c`; `--focus-min 0.03` counts them in a shot only at 3 % of the frame or more
+  ("only where the detection is really clear": crowds at a lift with one of us far away had counted).
 - **Animals** (`objects.py`) count like a person of the same size; in a garden YOLO sees them in cabbage beds
   and clothes on a porch, hence `--animals 0`.
 
@@ -227,6 +261,15 @@ which owners call beautiful: those come in as editor's pieces.
 - **Old exports** (`exports.py`): centre thumbnails at 10 Hz, aspect matched, best correlation over every
   offset; pieces that run on in the same original merge. A 35 s export was found at 72.8-107.8 s (0.84
   against 0.13); a whole-clip export is reported as a copy, not a pick.
+
+## The timeline index
+
+`timeline.py` builds `out/<job>/timeline.sqlite` from the features after every `features` step: a row per clip
+per half second (GPS speed, altitude and climb, rotation, flow, parallax, brightness, people and each main
+character's size, aesthetics and scenic views, the likeliest activity) and a row per person (track, box, name).
+The npz files stay the source; the index answers questions across them in one query ("where is she in view, with
+a view behind, at speed") instead of a one-off script loading five files onto one time grid. The owner asked
+for it once the information piled up.
 
 ## Gyroflow and stabilization
 

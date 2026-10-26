@@ -38,7 +38,9 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - The pilot (FPV goggles, or a radio in the hands) may appear, about 15 % of the edit at most. Anyone else
   with busy hands (a pram, a phone, a bag) is not the pilot.
 - The main character comes from the task, in words (`people.py subject --text`), or by example
-  (`people.py who`). A few wrong people in the picks are fine; do not tighten thresholds until a person is lost.
+  (`people.py who`; screenshots the owner sends go into the job file's `[who]`: found in the footage, the
+  person followed along their track). A few wrong people in the picks are fine; do not tighten thresholds
+  until a person is lost. Whoever holds the camera is not in the picture.
 - No flights to nowhere: in a people edit, footage with nobody in it belongs only to flying scenes built
   around a manoeuvre. With little footage, a shorter edit is better than filler.
 - Read the footage folder first: the owner's old exports are often the best moments (`exports.py`), and clips
@@ -103,7 +105,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`,
   `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the musical hits).
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
-  animals in clutter), `--subject TAG` with `--focus` (an edit about one person), `--minor TAG` (another
+  animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
+  `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another
   edit's main character counts like the pilot), `--peers` (look-alikes that must not stand in), `--avoid
   EDL` (a series from one shoot: keep earlier edits' footage out).
 - A camera carried by a person (skiing, cycling, walking; `camera = "carried"` in the job file): `--carried`
@@ -126,8 +129,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 
 ## Other tools
 
-- `people.py subject|who|split|passes|summary`: main characters in words or by example, look-alike groups,
-  close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
+- `people.py track|subject|who|split|passes|summary`: tracks through every other frame, main characters in
+  words or by example (a screenshot found in the footage), look-alike groups, close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
