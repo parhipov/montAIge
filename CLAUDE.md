@@ -114,7 +114,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   ground speed from `gps.py track` in the piloting score, e.g. 0.5; a drone with a GoPro too).
 - Flying: `--fly N` (flying scenes around a manoeuvre on the biggest lifts), `--ramps`, `--heroes N` (the
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
-  in loud phrases), `--want KIND` (e.g. `ascent`), `--arcs N` (whole climbs and descents).
+  in loud phrases), `--want KIND` (e.g. `ascent`; `reveal`: a view opening up, any camera), `--arcs N` (whole
+  climbs and descents).
 - Music structure: edit.py prints the track's sections per phrase and its chorus (the section that comes back
   loudest); `--sections` puts the heroes and flying scenes on the chorus, the first one first, and with
   `--lively` the 4-beat shots only there.

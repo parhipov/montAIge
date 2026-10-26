@@ -57,6 +57,14 @@ renders (same frame count as the original), telemetry from the original.
   the horizon), pull-up (camera up more than 50° in 1 s), close pass (parallax above the 98.5th percentile,
   little rotation), descent from height (camera more than 18° down for 1.5 s while everything is far), ascent
   (below).
+- **A view opening up** (`--want reveal`, a cue Insta360's AI Director uses): within 2 s the CLIP probability of a
+  wide view far away, against things up close (trees, a wall, snow, the ground, people, the sky), rises by 0.45
+  to 0.5 or more from 0.35 or less. On a helmet GoPro (Arkhyz) the best were the head lifting from the snow or its
+  shadow to the peaks, and the rotation fell after them (46 -> 15, 38 -> 4, 96 -> 16 deg/s) while weak ones,
+  already open, kept turning (11 -> 12, 31 -> 29): a carried camera has to slow to under 0.7 of its rotation
+  before. From a drone (fpv2022) nearly all the top ones were real (over a wall to a monastery, past a cliff to a
+  lake with a church, above the trees to a village) but the drone turned faster into them as often as not, so no
+  slowing there. Arkhyz: 17 views opening, 5 of them in a 74 s edit asking for them.
 - **Ascents and arcs** come from the picture, since there is no altitude in the telemetry: the CLIP
   probability of "a view from high above" against ground-level views, the sky and a roof up close rises from
   under 0.3 to over 0.6 within 8 s and stays over 0.65 for 2.5 s with everything far (parallax rank under 0.5).

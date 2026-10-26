@@ -94,7 +94,16 @@ ASC_LOW_TEXTS = ['a garden seen from the ground', 'grass and bushes up close', '
                  'people standing in a garden', 'the sky', 'a roof up close']
 ASC_LOW, ASC_HIGH, ASC_KEEP, ASC_WITHIN_S, ASC_FAR = 0.3, 0.6, 0.65, 8.0, 0.5
 MOVES = ('dive', 'pull-up', 'pitch-down', 'turn-a', 'turn-b', 'roll', 'pass', 'cruise')
-EVENT_KINDS = ('roll', 'spin', 'loop', 'dive', 'pull-up', 'pass', 'descent', 'ascent')
+EVENT_KINDS = ('roll', 'spin', 'loop', 'dive', 'pull-up', 'pass', 'descent', 'ascent', 'reveal')
+# a view opens up (--want reveal, add_reveals): within REVEAL_S the CLIP probability of a wide view far away,
+# against things up close, rises by REVEAL_RISE to REVEAL_OPEN or more from REVEAL_SHUT or less. A carried camera
+# also slows down (the head stops to look: rotation after under REVEAL_SLOW x before); a drone flies into it,
+# turning faster as often as not
+REVEAL_WIDE = ['a wide view of a valley far below', 'a panorama of mountains to the horizon',
+               'a wide landscape seen from above', 'a view across a town to the horizon']
+REVEAL_CLOSE = ['trees and branches up close', 'a wall up close', 'snow up close', 'the ground up close',
+                'inside a forest', 'people up close', 'a room indoors', 'the sky']
+REVEAL_S, REVEAL_RISE, REVEAL_OPEN, REVEAL_SHUT, REVEAL_SLOW = 2.0, 0.45, 0.5, 0.35, 0.7
 # --want KIND: the edit asks for this manoeuvre kind; a shot with one in the middle half of it gets W_WANT
 W_WANT, WANT = 3.0, []
 # with climbs asked for: CLIP height (the ascents' probability) in the cinematic piloting score
@@ -1175,11 +1184,7 @@ def add_ascents(flights, cache):
         f.arcs = arcs
         f.high = np.interp(np.arange(f.n), fr, ps)
         if found:
-            ev = sorted(list(zip(f.tricks, f.trick_deg, f.trick_kind)) +
-                        [(c, 1.2 * TRICK_DEG, 'ascent') for c in found])
-            f.tricks = np.array([e[0] for e in ev], int)
-            f.trick_deg = np.array([e[1] for e in ev])
-            f.trick_kind = [e[2] for e in ev]
+            add_events(f, found, 'ascent')
             print(f'  F{f.idx} {f.name}: up and down ' + ', '.join(
                 f'{a / f.fps:.1f}-{e / f.fps:.1f}s (up {u:.0f}s, far {p:.2f})' for a, _, e, u, p in arcs))
     seen_high = [f for f in flights if getattr(f, 'high', None) is not None]
@@ -1188,6 +1193,51 @@ def add_ascents(flights, cache):
         for f in seen_high:
             f.cine = (1 - CINE_HEIGHT) * f.cine + CINE_HEIGHT * prank(f.high, pool)
             f.cc = csum(f.cine)
+
+
+def add_events(f, frames, kind):
+    """Manoeuvres of one kind at these frames, merged into the flight's own in order."""
+    ev = sorted(list(zip(f.tricks, f.trick_deg, f.trick_kind)) + [(c, 1.2 * TRICK_DEG, kind) for c in frames])
+    f.tricks = np.array([e[0] for e in ev], int)
+    f.trick_deg = np.array([e[1] for e in ev])
+    f.trick_kind = [e[2] for e in ev]
+
+
+def add_reveals(flights, cache):
+    """Views opening up (see REVEAL_*) added to each flight's manoeuvres; flights without CLIP embeddings
+    (places.py embed) get none. A helmet GoPro: the head lifting from the snow or its shadow to the peaks; a
+    drone: over a wall to a monastery, past a cliff to a lake with a church."""
+    import places
+    mdl, temb = None, None
+    for f in flights:
+        if not os.path.exists(os.path.splitext(f.stab)[0] + '_clip.npz'):
+            continue
+        if mdl is None:
+            mdl = places.model_of(cache)
+            temb = places.text_emb(mdl, REVEAL_WIDE + REVEAL_CLOSE)
+        fr, _, emb = places.embed(f.stab, mdl)
+        fr = np.asarray(fr)
+        if fr.size < 4:
+            continue
+        pw = uniform_filter1d(places.probs(emb.astype(np.float32), temb, len(REVEAL_WIDE)).sum(1), 3)
+        k = max(int(round(REVEAL_S * f.fps / (fr[1] - fr[0]))), 2)          # samples in REVEAL_S
+        before = np.array([pw[max(j - k, 0):max(j - 1, 1)].mean() for j in range(pw.size)])
+        after = np.array([pw[j + 1:j + 1 + k].mean() if j + 1 < pw.size else 0.0 for j in range(pw.size)])
+        rise = after - before
+        found, j = [], 0
+        while j < pw.size:
+            if not (rise[j] >= REVEAL_RISE and after[j] >= REVEAL_OPEN and before[j] <= REVEAL_SHUT):
+                j += 1
+                continue
+            j += int(np.argmax(rise[j:j + 2 * k]))
+            c = min(int(fr[j]), f.n - 1)
+            a, b = max(c - int(1.5 * f.fps), 0), min(c + int(2 * f.fps), f.n)
+            if f.usable[c] and (not CARRIED[0] or f.vis[c:b].mean() <= REVEAL_SLOW * f.vis[a:c].mean()):
+                found.append(c)
+            j += 2 * k
+        if found:
+            add_events(f, found, 'reveal')
+            print(f'  F{f.idx} {f.name}: views opening at ' + ', '.join(f'{c / f.fps:.1f}s' for c in found))
 
 
 def pick_arcs(flights, m, n, taken):
@@ -2160,6 +2210,8 @@ def prepare_flights(flights, a):
     """What the options ask of the footage beyond find_flights: climbs, beautiful views, themes."""
     if 'ascent' in a.want or a.arcs:
         add_ascents(flights, a.clip_cache)
+    if 'reveal' in a.want:
+        add_reveals(flights, a.clip_cache)
     if W_BEAUTY:
         set_beauty(flights)
     if THEMES:
