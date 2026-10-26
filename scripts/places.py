@@ -52,6 +52,8 @@ ACTIVITIES = ['a man working on a roof', 'a person on a ladder', 'a person mowin
               'people playing ball', 'people playing tennis', 'people dancing', 'a band playing on a stage',
               'people working in a vegetable garden', 'a person chopping wood', 'a person washing a car',
               'a person walking a dog', 'a person pushing a baby stroller', 'people skiing',
+              'people riding a chairlift', 'people snowboarding', 'people standing in a queue',
+              'people taking a selfie', 'people sitting in a cafe',
               'people sledding in the snow', 'people fishing', 'people on a boat', 'people having a picnic',
               'a person wearing FPV goggles flying a drone', 'people waving at the camera',
               'workers at a construction site', 'a car driving on a road']

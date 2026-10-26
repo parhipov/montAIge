@@ -1,6 +1,7 @@
 """People in the picture, person by person: pose (YOLOv8-pose), who the pilot is, close passes.
 
     python people.py detect --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_people.npz
+    python people.py track  --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_ptrack.npz, _tid.npy
     python people.py pilot  RENDER.mp4 [...] [--sheet check.jpg]                    -> <render>_pilot.npy
     python people.py passes --weights ... RENDER.mp4 [...]                           -> <render>_passes.npz
     python people.py subject RENDER.mp4 [...] --text "a woman pushing a baby stroller" [--text ...] [--not ...] [--tag NAME]
@@ -11,6 +12,9 @@
 
 detect   2 samples a second; per person: box, 17 keypoints, a colour print of the clothes (top and
          bottom half: hue histogram weighted by saturation, value histogram, mean saturation).
+track    Every person through every other frame (and every sample frame of detect): BoT-SORT, its global motion
+         compensation keeping ids while the camera moves with a skier or a drone; every detect row gets its track
+         id. who, subject and the pilot carry labels along these tracks instead of the greedy 2 Hz ones.
 pilot    The pilot stands still holding the radio, wears goggles and is in nearly every flight. Clothes
          prints of all clips are clustered; the cluster that most often holds a radio (wrists together in
          front of the torso) and shows up in most clips is the pilot. Every person close to it in clothes,
@@ -36,6 +40,10 @@ who      Main characters by example: a crop of each person (--ref NAME=IMAGE, se
          others too, as --ref _NAME=IMAGE (the coach in black took the small girl in black otherwise).
          --ref NAME=CLIP:SECONDS:X cuts the reference from the original clip: the person nearest to X (0..1
          across the frame) at that moment, as on a screenshot the user sends (--originals clip list).
+         With tracks (track), a reference image that is a screenshot of the footage is found in it (CLIP, then
+         the pixels) and that person's whole track becomes the references, at the footage's own size and blur;
+         people in view at the same moments are somebody else. Whole tracks are labelled, by the median of their
+         rows (find_who_tracked). A 4K screenshot against 640 px crops matched every skier in blue otherwise.
          --ref NAME=@TAG takes the rows labelled TAG as references: after `split --keep`, a second `who`
          with --ref kid=@kid --ref _alike=@kid_not finds the child again, minus the look-alikes.
 split    The rows of one main character (--tag) in --k groups by look, a sheet row per group; --keep lists
@@ -424,6 +432,68 @@ def tracks(z, max_gap=2, dist=0.12):
     return tid
 
 
+# tracks through (nearly) every frame: the greedy 2 Hz tracks above lose a person at every turn of a camera that moves
+# with a skier or a drone; a tracker on every TRACK_STEP-th frame with global motion compensation keeps them
+TRACK_STEP, TRACKER, TRACK_IOU = 2, 'botsort.yaml', 0.5
+
+
+def track_people(weights, render, step=TRACK_STEP, tracker=TRACKER):
+    """Every person through the render: the pose model on every `step`-th frame and every sample frame of detect,
+    BoT-SORT (sparse optical flow compensates the camera's own motion) -> <render>_ptrack.npz (frame, box, tid per
+    tracked box) and <render>_tid.npy: the tracker's id of every people.npz row (the tracked box at the same frame
+    overlapping it by TRACK_IOU or more), -1 for none."""
+    from ultralytics import YOLO
+    model = YOLO(weights)                                        # a fresh tracker per clip
+    base = os.path.splitext(render)[0]
+    z = np.load(base + '_people.npz')
+    want = set(int(s) for s in z['samples'])
+    c = av.open(render)
+    st = c.streams.video[0]
+    st.thread_type = 'AUTO'
+    fps = float(st.average_rate)
+    frames, boxes, ids = [], [], []
+    for fr in c.decode(st):
+        i = int(round(float(fr.pts * st.time_base) * fps))
+        if i % step and i not in want:
+            continue
+        img = fr.to_ndarray(format='bgr24')
+        r = model.track(img, persist=True, tracker=tracker, imgsz=640, conf=0.1, verbose=False)[0]
+        if r.boxes is None or r.boxes.id is None or not len(r.boxes):
+            continue
+        H, W = img.shape[:2]
+        frames += [i] * len(r.boxes)
+        boxes.append(r.boxes.xywh.cpu().numpy() / np.array([W, H, W, H]))
+        ids.append(r.boxes.id.cpu().numpy().astype(int))
+    c.close()
+    frames = np.array(frames, np.int64)
+    boxes = np.concatenate(boxes).astype(np.float32) if boxes else np.zeros((0, 4), np.float32)
+    ids = np.concatenate(ids) if ids else np.zeros(0, int)
+    np.savez(base + '_ptrack.npz', frame=frames, box=boxes, tid=ids)
+    tid = -np.ones(len(z['frame']), int)
+    for k, (f, b) in enumerate(zip(z['frame'], z['box'])):
+        at = np.flatnonzero(frames == f)
+        if at.size:
+            ov = [iou(b, boxes[j]) for j in at]
+            if max(ov) >= TRACK_IOU:
+                tid[k] = ids[at[int(np.argmax(ov))]]
+    np.save(base + '_tid.npy', tid)
+    return tid
+
+
+def row_tracks(render, z):
+    """Track id of every people.npz row: the tracker's (people.py track) when it ran, else the greedy 2 Hz tracks;
+    rows the tracker missed get ids of their own."""
+    p = os.path.splitext(render)[0] + '_tid.npy'
+    if os.path.exists(p):
+        tid = np.load(p)
+        if len(tid) == len(z['frame']):
+            tid = tid.copy()
+            lone = tid < 0
+            tid[lone] = tid.max(initial=0) + 1 + np.arange(lone.sum())
+            return tid
+    return tracks(z)
+
+
 def find_pilot_clip(renders, sheet=None, row_thr=0.5, track_frac=0.3):
     tot = dict(rows=0, by_clip=0, by_track=0, by_radio=0)
     for r in renders:
@@ -543,7 +613,271 @@ def person_embeddings(renders, feats):
     return out
 
 
-def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN):
+def frames_at(render, wanted):
+    """{frame: RGB image} for the wanted frames of a render, seeking instead of decoding the whole clip."""
+    out = {}
+    wanted = sorted(set(int(f) for f in wanted))
+    if not wanted:
+        return out
+    c = av.open(render)
+    st = c.streams.video[0]
+    fps = float(st.average_rate)
+    pos = None
+    for f in wanted:
+        if pos is None or f < pos or f - pos > 120:
+            c.seek(int(max(f - 2, 0) / fps / st.time_base), stream=st, backward=True)
+        for fr in c.decode(st):
+            i = int(round(float(fr.pts * st.time_base) * fps))
+            pos = i
+            if i >= f:
+                if i == f:
+                    out[f] = fr.to_ndarray(format='rgb24')
+                break
+    c.close()
+    return out
+
+
+def tight_crop(img, box, pad=0.05):
+    H, W = img.shape[:2]
+    cx, cy, w, h = box
+    x0, x1 = int(max((cx - w / 2 - pad * w) * W, 0)), int(min((cx + w / 2 + pad * w) * W, W))
+    y0, y1 = int(max((cy - h / 2 - pad * h) * H, 0)), int(min((cy + h / 2 + pad * h) * H, H))
+    return img[y0:max(y1, y0 + 4), x0:max(x1, x0 + 4)]
+
+
+def pixel_likeness(a, b):
+    """Normalized correlation of two person crops (RGB) at 16 x 32: the same moment of the same person ~0.8+."""
+    x = cv2.resize(a, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32).ravel()
+    y = cv2.resize(b, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32).ravel()
+    x, y = (x - x.mean()) / (x.std() + 1e-6), (y - y.mean()) / (y.std() + 1e-6)
+    return float((x * y).mean())
+
+
+def context_likeness(shot, sbox, frame, cbox):
+    """The whole screenshot laid over the frame so that its person box covers the candidate's (scale and place from
+    the boxes, normalized cx cy w h): normalized correlation of the two pictures at 32 px high, colour. The
+    background tells one moment from another where a skier in blue looks like many: on a 4K screenshot against
+    640 px crops the person alone (pixel_likeness) took a stranger in blue (0.56) for the right one."""
+    SH, SW = shot.shape[:2]
+    H, W = frame.shape[:2]
+    k = cbox[3] * H / max(sbox[3] * SH, 1e-6)
+    x0 = int(round(cbox[0] * W - sbox[0] * SW * k))
+    y0 = int(round(cbox[1] * H - sbox[1] * SH * k))
+    w, h = max(int(round(SW * k)), 2), max(int(round(SH * k)), 2)
+    gh = 32
+    gw = max(int(round(gh * w / h)), 4)
+    region = np.zeros((h, w, 3), np.uint8)
+    mask = np.zeros((h, w), np.uint8)
+    fx0, fy0, fx1, fy1 = max(x0, 0), max(y0, 0), min(x0 + w, W), min(y0 + h, H)
+    if fx1 <= fx0 or fy1 <= fy0:
+        return -1.0
+    region[fy0 - y0:fy1 - y0, fx0 - x0:fx1 - x0] = frame[fy0:fy1, fx0:fx1]
+    mask[fy0 - y0:fy1 - y0, fx0 - x0:fx1 - x0] = 255
+    small = cv2.resize(region, (gw, gh), interpolation=cv2.INTER_AREA)
+    inside = cv2.resize(mask, (gw, gh), interpolation=cv2.INTER_AREA) > 250
+    if inside.mean() < 0.3:
+        return -1.0
+    a = cv2.resize(shot, (gw, gh), interpolation=cv2.INTER_AREA).astype(np.float32)[inside]
+    b = small.astype(np.float32)[inside]
+    a, b = (a - a.mean()) / (a.std() + 1e-6), (b - b.mean()) / (b.std() + 1e-6)
+    return float((a * b).mean())
+
+
+# a reference image that is a screenshot of the footage (what an owner sends: "that's us") is found in it: the person
+# in the image (the pose model; the biggest one), the LOCATE_TOP person rows nearest to it in CLIP, and of those the
+# one whose picture matches best (the person and, with the whole screenshot laid over the frame, the context). The
+# samples are 0.5 s apart, so the LOCATE_REFINE best are looked at on every frame within LOCATE_NEAR_S (the person's
+# box from people.py track): the screenshot's own moment matches far better than anybody else's. Found when the
+# best frame is LOCATE_SURE or more
+LOCATE_TOP, LOCATE_REFINE, LOCATE_NEAR_S, LOCATE_SURE = 80, 6, 0.4, 0.6
+
+
+def track_boxes(render, row, z):
+    """{frame: box} of the track of a people.npz row (people.py track), or just {its frame: its box}."""
+    base = os.path.splitext(render)[0]
+    out = {int(z['frame'][row]): z['box'][row]}
+    if os.path.exists(base + '_tid.npy') and os.path.exists(base + '_ptrack.npz'):
+        t = np.load(base + '_tid.npy')[row]
+        if t >= 0:
+            pt = np.load(base + '_ptrack.npz')
+            m = pt['tid'] == t
+            out.update({int(f): b for f, b in zip(pt['frame'][m], pt['box'][m])})
+    return out
+
+
+def locate(image, renders, emb, feats, weights):
+    """(render, row, likeness, CLIP cosine, frame) of the person row most like this screenshot (found when the
+    likeness is LOCATE_SURE or more), or None."""
+    from PIL import Image
+    from ultralytics import YOLO
+    shot = cv2.cvtColor(cv2.imread(image), cv2.COLOR_BGR2RGB)
+    img, sbox = shot, np.array([0.5, 0.5, 1.0, 1.0])
+    r = YOLO(weights).predict(shot[..., ::-1].copy(), imgsz=640, conf=0.3, verbose=False)[0]
+    if r.boxes is not None and len(r.boxes):
+        H, W = shot.shape[:2]
+        bx = r.boxes.xywh.cpu().numpy() / np.array([W, H, W, H])
+        sbox = bx[int(np.argmax(bx[:, 2] * bx[:, 3]))]
+        img = tight_crop(shot, sbox)
+    e = feats([Image.fromarray(img)])[0]
+    rows = [(rr, i) for rr in renders for i in range(len(emb[rr]))]
+    E = np.concatenate([emb[rr] for rr in renders])
+    s = E @ e
+    cand = np.argsort(-s)[:LOCATE_TOP]
+
+    def like(f, box):
+        return 0.5 * pixel_likeness(img, tight_crop(f, box)) + 0.5 * context_likeness(shot, sbox, f, box)
+    first = []
+    for rr in renders:
+        mine = [j for j in cand if rows[j][0] == rr]
+        if not mine:
+            continue
+        z = np.load(os.path.splitext(rr)[0] + '_people.npz')
+        fr = frames_at(rr, [z['frame'][rows[j][1]] for j in mine])
+        first += [(like(fr[int(z['frame'][rows[j][1]])], z['box'][rows[j][1]]), j) for j in mine
+                  if int(z['frame'][rows[j][1]]) in fr]
+    best = None
+    for _, j in sorted(first, reverse=True)[:LOCATE_REFINE]:     # every frame near the best few
+        rr, i = rows[j]
+        z = np.load(os.path.splitext(rr)[0] + '_people.npz')
+        f0, near = int(z['frame'][i]), int(LOCATE_NEAR_S * float(z['fps']))
+        boxes = {f: b for f, b in track_boxes(rr, i, z).items() if abs(f - f0) <= near}
+        fr = frames_at(rr, list(boxes))
+        for f, b in boxes.items():
+            if f in fr:
+                p = like(fr[f], b)
+                if best is None or p > best[2]:
+                    best = (rr, i, p, float(s[j]), f)
+    return best
+
+
+# who from tracks (people.py track ran): the located person's track gives the references, the people in view at the
+# same moments are somebody else. A row is like a person by the mean of its WHO_K best cosines to that person's rows,
+# minus the same to everybody known to be somebody else; a whole track goes to the person when the median of its rows
+# is WHO_TRACK_M or more (and ahead of the other names); WHO_ROUNDS rounds, the found tracks joining the references
+WHO_K, WHO_TRACK_M, WHO_ROUNDS = 5, 0.02, 3
+# only rows a person can be told by count: the pose model sure of a body (WHO_CONF) with 3 of shoulders and hips
+# seen and WHO_MIN_H of the frame high (a helmet camera's own skis and a snowboard up close passed for people and,
+# alike to nothing, were "more like marina than like the others"); and a track goes to a person only when its rows
+# are WHO_P_MIN alike to that person's at least, whatever the others
+WHO_CONF, WHO_MIN_H, WHO_P_MIN = 0.5, 0.08, 0.85
+# and a person's look is CLIP and the colours of the clothes (detect's colour print, top and bottom half) together,
+# at WHO_COLOUR to 1: at 640 px CLIP alone took children in pink and orange for a woman in turquoise and red trousers
+# (half of her rows); with the colours ~3 of 4 rows were her, and 3x the rows (a floor of 0.80; 0.85 kept 3 of 4)
+WHO_COLOUR = 1.0
+
+
+def looks(renders, emb):
+    """{render: unit vectors of CLIP and the clothes colours (WHO_COLOUR) per people.npz row}."""
+    out = {}
+    for r in renders:
+        a = np.load(os.path.splitext(r)[0] + '_people.npz')['app'].astype(np.float32)
+        a = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-6)
+        x = np.concatenate([emb[r], WHO_COLOUR * a], 1)
+        out[r] = x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-6)
+    return out
+
+
+def readable(z):
+    """Per people.npz row: a person whose look can tell who they are (see WHO_CONF)."""
+    if not len(z['frame']):
+        return np.zeros(0, bool)
+    kp = z['kp'].reshape(len(z['frame']), 17, 3)
+    torso = (kp[:, [LSH, RSH, LHIP, RHIP], 2] > KP_OK).sum(1)
+    return (z['conf'] >= WHO_CONF) & (torso >= 3) & (z['box'][:, 3] >= WHO_MIN_H)
+
+
+def find_who_tracked(renders, emb, feats, refs, weights):
+    """{name: row masks per render} from located screenshots and tracks, or None when no reference was found in
+    the footage. Image references not found stay references as they are."""
+    from PIL import Image
+    tids = {r: row_tracks(r, np.load(os.path.splitext(r)[0] + '_people.npz')) for r in renders}
+    frames = {r: np.load(os.path.splitext(r)[0] + '_people.npz')['frame'] for r in renders}
+    rows = [(r, i) for r in renders for i in range(len(emb[r]))]
+    lk = looks(renders, emb)
+    E = np.concatenate([lk[r] for r in renders])
+    off = {}
+    o = 0
+    for r in renders:
+        off[r] = o
+        o += len(emb[r])
+    tkey = np.array([f'{r}#{tids[r][i]}' for r, i in rows])
+    good = np.concatenate([readable(np.load(os.path.splitext(r)[0] + '_people.npz')) for r in renders])
+    pos = {n: np.zeros(len(rows), bool) for n in refs}
+    extra = {n: [] for n in refs}
+    found = 0
+    for n, paths in refs.items():
+        for p in paths:
+            if p.startswith('@'):
+                continue
+            hit = locate(p, renders, emb, feats, weights)
+            if hit is None or hit[2] < LOCATE_SURE:
+                print(f'  {n}: {os.path.basename(p)} not found in the footage'
+                      + (f' (best {hit[2]:.2f} in {os.path.basename(hit[0])})' if hit else '')
+                      + ', kept as an image reference')
+                e = np.concatenate([feats([Image.open(p).convert('RGB')])[0], np.zeros(E.shape[1] - 512, np.float32)])
+                extra[n].append(e)                               # no colour print: CLIP only
+                continue
+            r, i, px, cs, _ = hit
+            pos[n] |= tkey == f'{r}#{tids[r][i]}'
+            found += 1
+            fps = float(np.load(os.path.splitext(r)[0] + '_people.npz')['fps'])
+            print(f'  {n}: {os.path.basename(p)} found in {os.path.basename(r)} at {frames[r][i] / fps:.1f} s '
+                  f'(pixels {px:.2f}, CLIP {cs:.2f}), its track {int((tkey == tkey[off[r] + i]).sum())} rows')
+    if not found:
+        return None
+    names = list(refs)
+    same_frame = {}
+    for j, (r, i) in enumerate(rows):
+        same_frame.setdefault((r, int(frames[r][i])), []).append(j)
+    keys, inv = np.unique(tkey, return_inverse=True)
+    seeds = {n: pos[n].copy() for n in names}
+    for rnd in range(WHO_ROUNDS):
+        anyone = np.zeros(len(rows), bool)
+        for n in names:
+            anyone |= pos[n]
+        neg_all = np.zeros(len(rows), bool)                      # in view with a known person, not them
+        for j in np.flatnonzero(anyone):
+            r, i = rows[j]
+            for k in same_frame[(r, int(frames[r][i]))]:
+                if tkey[k] != tkey[j]:
+                    neg_all[k] = True
+
+        def topk(mask, add=()):
+            X = E[mask]
+            if len(add):
+                X = np.vstack([X, np.array(add, np.float32)])
+            if not len(X):
+                return np.zeros(len(E))
+            S = E @ X.T
+            k = min(WHO_K, S.shape[1])
+            return np.sort(np.partition(S, -k, axis=1)[:, -k:], 1).mean(1)
+        M, PP = [], []
+        for n in names:
+            others = (neg_all | (anyone & ~pos[n])) & good
+            pn = topk(pos[n] & good, extra[n])
+            M.append(pn - topk(others & ~pos[n]))
+            PP.append(pn)
+        M, PP = np.stack(M, 1), np.stack(PP, 1)
+        # a track's median margin per name, over its readable rows; alike enough in itself (WHO_P_MIN)
+        med = np.full((len(keys), len(names)), -1.0)
+        for t in range(len(keys)):
+            m = (inv == t) & good
+            if m.any():
+                med[t] = np.where(np.median(PP[m], 0) >= WHO_P_MIN, np.median(M[m], 0), -1.0)
+        new = {n: seeds[n].copy() for n in names}               # the located tracks stay theirs
+        best = np.argmax(med, 1)
+        srt = np.sort(med, 1)
+        lead = srt[:, -1] - (srt[:, -2] if len(names) > 1 else -1.0)
+        for t in np.flatnonzero((srt[:, -1] >= WHO_TRACK_M) & (lead > 0)):
+            if not any(seeds[m][inv == t].any() for m in names):
+                new[names[best[t]]] |= inv == t
+        print(f'  round {rnd + 1}: ' + ', '.join(f'{n} {int(new[n].sum())} rows in '
+                                                 f'{len(set(tkey[new[n]].tolist()))} tracks' for n in names))
+        pos = new
+    return {n: {r: pos[n][off[r]:off[r] + len(emb[r])] for r in renders} for n in names}
+
+
+def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN, weights=None):
     """refs: {name: [image paths]}. Every person row goes to the reference person it resembles most (CLIP
     cosine at least `sim`, ahead of the next person by `margin`), or to nobody; the pilot is nobody. The
     WHO_EXPAND most confident rows of each person then join their references (a back view, a side view)
@@ -554,6 +888,50 @@ def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN):
     feats = clip_image_feats(cache)
     names = list(refs)
     emb = person_embeddings(renders, feats)
+
+    def report(names, picks, order):
+        """Seconds in view per name; the sheet: the reference, then 20 of the picks (`order`: by score, or spread
+        over the footage)."""
+        for n in names:
+            secs = sum(len(set(np.load(os.path.splitext(r)[0] + '_people.npz')['frame'][np.load(subject_file(os.path.splitext(r)[0], n))].tolist()))
+                       for r in renders) * 0.5
+            print(f'who {n}: {len(picks[n])} person rows, in view ~{secs:.0f} s (2 samples a second)')
+        if not sheet:
+            return
+        out = []
+        for n in names:
+            pk = sorted(picks[n], reverse=True)
+            if order == 'spread':
+                pk = sorted(picks[n], key=lambda p: (p[1], p[2]))
+                sel = [pk[int(k)] for k in np.linspace(0, len(pk) - 1, min(20, len(pk)))] if pk else []
+            else:
+                sel = (pk[:8] + pk[len(pk) // 2:len(pk) // 2 + 4] + pk[-8:]) if len(pk) > 20 else pk
+            tiles = []
+            for _, r, i in sel:
+                z = np.load(os.path.splitext(r)[0] + '_people.npz')
+                im = crops_at(r, {'frame': z['frame'][i:i + 1], 'box': z['box'][i:i + 1]}, pad=0.1)[0]
+                tiles.append(cv2.cvtColor(np.asarray(im.resize((72, 128))), cv2.COLOR_RGB2BGR))
+            first = next((p for p in refs[n] if not p.startswith('@')), None)
+            tiles = ([cv2.resize(cv2.imread(first), (72, 128))] if first else [np.zeros((128, 72, 3), np.uint8)]) + tiles
+            tiles += [np.zeros((128, 72, 3), np.uint8)] * (21 - len(tiles))
+            row = np.hstack(tiles[:21])
+            cv2.putText(row, n, (3, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            out.append(row)
+        cv2.imwrite(sheet, np.vstack(out), [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+    if weights and all(os.path.exists(os.path.splitext(r)[0] + '_tid.npy') for r in renders):
+        res = find_who_tracked(renders, emb, feats, refs, weights)
+        if res is not None:
+            names = [n for n in names if not n.startswith('_')]
+            picks = {n: [] for n in names}
+            for n in names:
+                for r in renders:
+                    base = os.path.splitext(r)[0]
+                    np.save(subject_file(base, n), res[n][r])
+                    z = np.load(base + '_people.npz')
+                    picks[n] += [(float(z['box'][i, 2] * z['box'][i, 3]), r, int(i)) for i in np.flatnonzero(res[n][r])]
+            report(names, picks, 'spread')
+            return
 
     def labelled(tag, most=60):
         """Embeddings of the rows labelled `tag` so far (the biggest crops first)."""
@@ -611,27 +989,7 @@ def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN):
             tot[n] += int(lab.sum())
             picks[n] += [(float(S[off + i, k]), r, int(i)) for i in np.flatnonzero(strong)]
         off += m
-    names = [n for n in names if not n.startswith('_')]
-    for n in names:
-        secs = sum(len(set(np.load(os.path.splitext(r)[0] + '_people.npz')['frame'][np.load(subject_file(os.path.splitext(r)[0], n))].tolist()))
-                   for r in renders) * 0.5
-        print(f'who {n}: {tot[n]} person rows, in view ~{secs:.0f} s (2 samples a second)')
-    if sheet:
-        out = []
-        for n in names:
-            pk = sorted(picks[n], reverse=True)
-            sel = (pk[:8] + pk[len(pk) // 2:len(pk) // 2 + 4] + pk[-8:]) if len(pk) > 20 else pk
-            tiles = []
-            for _, r, i in sel:
-                z = np.load(os.path.splitext(r)[0] + '_people.npz')
-                im = crops_at(r, {'frame': z['frame'][i:i + 1], 'box': z['box'][i:i + 1]}, pad=0.1)[0]
-                tiles.append(cv2.cvtColor(np.asarray(im.resize((72, 128))), cv2.COLOR_RGB2BGR))
-            tiles = [cv2.resize(cv2.imread(refs[n][0]), (72, 128))] + tiles
-            tiles += [np.zeros((128, 72, 3), np.uint8)] * (21 - len(tiles))
-            row = np.hstack(tiles[:21])
-            cv2.putText(row, n, (3, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-            out.append(row)
-        cv2.imwrite(sheet, np.vstack(out), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    report([n for n in names if not n.startswith('_')], picks, 'score')
 
 
 def split_looks(renders, tag, k, sheet=None, keep=None):
@@ -957,7 +1315,8 @@ def summary(renders, tag=''):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('step', choices=('detect', 'pilot', 'pilotclip', 'subject', 'who', 'split', 'passes', 'summary'))
+    ap.add_argument('step', choices=('detect', 'track', 'pilot', 'pilotclip', 'subject', 'who', 'split', 'passes',
+                                     'summary'))
     ap.add_argument('--k', type=int, default=3, help='split: number of looks')
     ap.add_argument('--keep', default=None, help='split: the groups that are the person, e.g. 0,2')
     ap.add_argument('--ref', action='append', default=[], help='who: NAME=IMAGE, a crop of that person (repeatable)')
@@ -981,6 +1340,7 @@ def main():
     ap.add_argument('--every', type=int, default=25, help='at 50 fps; scaled to the clip rate')
     ap.add_argument('--clusters', type=int, default=6)
     ap.add_argument('--sheet', default=None)
+    ap.add_argument('--force', action='store_true', help='track: run again')
     a = ap.parse_args()
     renders = sorted({os.path.normcase(p): p for r in a.renders for p in glob.glob(r)}.values())
     if a.step in ('detect', 'passes'):
@@ -1002,6 +1362,16 @@ def main():
                 print(f'{os.path.basename(r)}: {len(ev)} close passes checked in {time.time() - t0:.0f}s', flush=True)
         if a.step == 'passes' and a.sheet:
             passes_sheet(renders, a.sheet)
+    elif a.step == 'track':
+        gpu.device()
+        for r in renders:
+            if os.path.exists(os.path.splitext(r)[0] + '_tid.npy') and not a.force:
+                continue
+            t0 = time.time()
+            tid = track_people(a.weights, r)
+            n = len(set(tid[tid >= 0].tolist()))
+            print(f'{os.path.basename(r)}: {n} tracks over {int((tid >= 0).sum())} of {len(tid)} people rows in '
+                  f'{time.time() - t0:.0f}s', flush=True)
     elif a.step == 'pilot':
         find_pilot(renders, a.clusters, a.sheet)
     elif a.step == 'pilotclip':
@@ -1030,7 +1400,7 @@ def main():
             refs.setdefault(n, []).append(path)
         if not refs:
             raise SystemExit('who: give each person with --ref NAME=IMAGE')
-        find_who(renders, a.clip_cache, refs, sheet=a.sheet, sim=a.sim, margin=a.margin)
+        find_who(renders, a.clip_cache, refs, sheet=a.sheet, sim=a.sim, margin=a.margin, weights=a.weights or a.pose)
         return
     elif a.step == 'split':
         split_looks(renders, a.tag, a.k, a.sheet, None if a.keep is None else {int(v) for v in a.keep.split(',')})

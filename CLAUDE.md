@@ -28,8 +28,9 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - Previews first: 640 px, 25 fps is enough to judge. 4K only when asked.
 - Scripts perceive, you decide. Checkers write per-frame numbers to `.npz` and print a few summary lines.
   Look at pictures only on a WARN, once when a detector meets new footage (`pilot_check.jpg`,
-  `passes_check.jpg`, `subject_check.jpg`), and the shot sheet of each edit (`edl_sheet.py`) before handing
-  previews over: one activity filling an edit from different angles passes every number.
+  `passes_check.jpg`, `subject_check.jpg`), and the shot sheet and cut sheet of each edit (`<edit>_sheet.jpg`,
+  `<edit>_cuts.jpg`, made by the `qc` step) before handing previews over: one activity filling an edit from
+  different angles passes every number, and a cut is judged by the music and motion around it, not by stills.
 - Editorial calls are yours: which track, how much pilot, pacing, which moments. When the owner names a
   moment, or you see one the scores miss, it goes in with `--must` / `--start` / `--end`, not by bending
   weights. A described moment is searched over all footage (`find:TEXT`, `places.py`, passes), never guessed
@@ -78,6 +79,7 @@ side by side in `out/<job>/4k/`.
 
 ```toml
 footage = ["/path/to/footage"]                    # folders (with subfolders) or clips
+camera = "carried"                                # in a hand or on a helmet, not flown (default "drone")
 lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log footage only
 objects = true                                    # vehicles and animals (objects.py)
 args = ["--people", "4"]                          # edit.py options of every edit, before each edit's own
@@ -104,13 +106,17 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   animals in clutter), `--subject TAG` with `--focus` (an edit about one person), `--minor TAG` (another
   edit's main character counts like the pilot), `--peers` (look-alikes that must not stand in), `--avoid
   EDL` (a series from one shoot: keep earlier edits' footage out).
+- A camera carried by a person (skiing, cycling, walking; `camera = "carried"` in the job file): `--carried`
+  (no pilot, no landings, no lean, dives or pull-ups: the pitch is where the head looks), `--speed W` (GPS
+  ground speed from `gps.py track` in the piloting score, e.g. 0.5; a drone with a GoPro too).
 - Flying: `--fly N` (flying scenes around a manoeuvre on the biggest lifts), `--ramps`, `--heroes N` (the
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
   in loud phrases), `--want KIND` (e.g. `ascent`), `--arcs N` (whole climbs and descents).
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
 - The owner's picks: `--picked W` (clips the owner stabilized themselves, `_stabilized` without the original).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
-  words, `beauty.py`): a beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
+  words, `beauty.py`; `plain = [...]` what fills the footage without being a view, e.g. snow up close): a
+  beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
 - Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty). Landings
   are marked and kept for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
@@ -125,7 +131,12 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
-- `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg`, `final.py`, `dji_join.py`,
+- `timeline.py out/<job> --sql "SELECT ..."`: every feature in one SQLite table, a row per clip per 0.5 s (speed,
+  altitude, rotation, parallax, people and each main character, beauty, activity) and a row per person: questions
+  across features in one query instead of a one-off script. montage.py rebuilds it after `features`.
+- `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
+  clips): a lift going up, a run going down, how fast.
+- `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg [--cuts]`, `final.py`, `dji_join.py`,
   `djimeta.py`.
 - `edl_edit.py`: a comment on one scene of a finished edit: `--replace K` (the same music, the rest frame for
   frame), `--end-from K` (the ending takes over). The music is never cut: that moves every later scene.

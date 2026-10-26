@@ -267,6 +267,14 @@ variety, people, the pilot leading the picture, the main character, piloting (sh
 editor's pieces apart: hovering is their point), activities per scene, flights. From the picture: audio
 against video length, dark frames, frozen frames, brightness jumps at cuts.
 
+The cut sheet (`edl_sheet.py --cuts`, made by montage.py's `qc` step) is a row per cut: two frames each side
+and, between them, 4 beats of music each side with its hits and the visible rotation of both shots at their
+playback speed, faint where the edit does not show it (what the cut left out, what came before the incoming
+shot), with motion onsets and manoeuvres. A benchmark of editing agents (Timeline-Bench, 2026) found most of
+their failures in the craft: they judged footage and renders by stills and transcripts, and the rhythm of a cut
+is not in a still. On one edit (fpv2022, 12 cuts) it showed at a glance a dive starting on the downbeat after a
+cut, and two hits before that cut falling on level flight.
+
 ## Ideas not done yet
 
 - Stabilization from the picture, for footage without motion data that was never stabilized (phone clips,
@@ -286,3 +294,8 @@ against video length, dark frames, frozen frames, brightness jumps at cuts.
   scene after it.
 - Per-shot Gyroflow settings: horizon lock off for flips.
 - An EDL / OTIO export for finishing by hand.
+- GoPro HiLight tags: a button pressed while recording is kept in the file, the owner's own pick (what Quik
+  builds on): weigh like `--picked`, or offer as `--must`. No footage with tags to try it on yet.
+- The footage's own sound, in words (CLAP, the audio twin of CLIP): laughter, a splash, shouting as `find:`
+  and themes (Insta360 and GoPro listen to it). Carried cameras only: a drone hears its propellers. No footage
+  to try it on yet.

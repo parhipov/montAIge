@@ -94,6 +94,10 @@ def main():
              f'{np.sum(L[sb > 0.3]):.0f} s of {dur:.0f} s', np.sum(L[sb > 0.3]) >= 0.6 * dur)
         si = np.array([x.get('stand_in', 0) for x in shots])
         line('look-alikes standing in for them', f'{np.sum(si > 0.3)} shots', np.sum(si > 0.3) == 0)
+    elif e.get('subject') and any('subject' in x for x in shots):   # main characters among other people: a count
+        sb = np.array([x.get('subject', 0) for x in shots])
+        line(f'main characters ({e.get("subject")})', f'in {np.sum(sb > 0.3)} of {len(shots)} shots, '
+             f'{np.sum(L[sb > 0.3]):.0f} s of {dur:.0f} s', True)
     sk = [x['skill'] for x in shots if 'skill' in x]
     if sk:
         # hovering is the point of a shot of people up close (a person at 2 % of the frame or more counts 1),

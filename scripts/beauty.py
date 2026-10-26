@@ -2,14 +2,16 @@
 beautiful views (edit.py --beauty W; off by default). Mountains for one job, a beach for another.
 
     python beauty.py RENDER.mp4 [...] --text "mountains" --text "a canyon with a river" [...]
-                     [--clip-cache models/clip] [--sheet beauty.jpg]       -> <render>_beauty.npz next to each
+                     [--plain "snow up close" ...] [--clip-cache models/clip] [--sheet beauty.jpg]
+                                                                          -> <render>_beauty.npz next to each
 
 Two numbers from the CLIP ViT-B/32 frame embeddings places.py keeps (every 0.5 s, computed when missing):
   aes     the LAION aesthetic predictor (a linear head on CLIP trained on people's 1-10 ratings of photos;
           models/aesthetic/sa_0_4_vit_b_32_linear.pth from github.com/LAION-AI/aesthetic-predictor): a good
           picture whatever it shows (light, composition, not blurred, not a fence up close)
-  scenic  CLIP zero-shot: the probability of the --text views against MUNDANE (what else drone footage shows),
-          softmax over both lists; without --text, 0
+  scenic  CLIP zero-shot: the probability of the --text views against MUNDANE (what else drone footage shows)
+          and the job's own plain views (--plain: what fills this footage without being a view, e.g. snow and
+          skis up close, a queue at a ski lift), softmax over both lists; without --text, 0
 What flying makes a view beautiful (smooth, far, the view opening up) is the cinematic piloting score in
 edit.py; this is only what is in the picture. Prints per clip the median aesthetic, the share of scenic
 views and the best stretches; --sheet: the best and the worst half seconds of all clips, to check by eye.
@@ -43,6 +45,8 @@ def main():
     ap.add_argument('renders', nargs='+')
     ap.add_argument('--clip-cache', default=os.path.join(paths.MODELS, 'clip'))
     ap.add_argument('--text', action='append', default=[], help='a beautiful view of this job, in words (repeatable)')
+    ap.add_argument('--plain', action='append', default=[],
+                    help='a plain view of this job, in words (repeatable): added to MUNDANE')
     ap.add_argument('--sheet', default=None)
     ap.add_argument('--force', action='store_true')
     a = ap.parse_args()
@@ -52,7 +56,7 @@ def main():
     w, b = aesthetic_head()
     mdl = places.model_of(a.clip_cache)
     scenic = a.text
-    temb = places.text_emb(mdl, scenic + MUNDANE) if scenic else None
+    temb = places.text_emb(mdl, scenic + MUNDANE + a.plain) if scenic else None
     rows = []
     for r in a.renders:
         fr, fps, emb = places.embed(r, mdl)

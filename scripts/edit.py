@@ -63,6 +63,14 @@ STILL_FLOW = 0.12
 LANDING_S, W_LANDING = 10.0, 6.0
 SKILL_PARTS = dict(parallax=0.45, lean=0.25, rotation=0.30)       # action: loud music
 CINE_PARTS = dict(parallax=0.55, lean=0.30, smooth=0.15)          # cinematic: quiet music
+# a camera carried by a person (--carried; montage.py's `camera = "carried"`: in a hand, on a helmet or the chest,
+# skiing, cycling, walking): nobody pilots it, so its pitch is where the head looks, not speed or a dive. No lean
+# in the piloting scores, no dive / pull-up / descent manoeuvres, and a stop is not a landing
+CARRIED = [False]
+# GPS ground speed (gps.py track; --speed W): W of the action score against the parts above, half of that in the
+# cinematic one, ranked across all footage; a frame without a fix ranks in the middle. Speed is what the action of a
+# carried camera is (a fast run down a slope), and fast flying of a drone that carries a GoPro
+SPEED_SMOOTH_S = 1.0
 PULLUP_DEG, PASS_RANK = 50.0, 0.985    # camera tilts up this much in 1 s; parallax percentile of a close pass
 # descent from height: camera this far below the horizon (2 s mean) for DESCENT_S while everything is far
 # (parallax rank under DESCENT_FAR); the manoeuvre is its middle, so a shot shows the way down and the
@@ -114,7 +122,7 @@ W_EMPTY, EMPTY_BELOW = 4.0, 0.35
 # every further pilot-alone shot pays W_PILOT_OVER x its pilot-alone share
 PILOT_WORTH, PILOT_BUDGET, W_PILOT_OVER = 0.3, 0.15, 3.0
 SUBJECT_BOOST = 2.0     # the film's main character (people.py subject) against anybody else
-SUBJECT_TAG = ['']      # --subject NAME: <render>_subject_NAME.npy instead of <render>_subject.npy
+SUBJECT_TAG = ['']      # --subject NAME: <render>_subject_NAME.npy instead of <render>_subject.npy; A+B+C: any of them
 MINOR_TAG = ['']        # --minor NAME: that main character (of another edit) counts like the pilot here
 # --focus: an edit about the main character; everybody else is worth this much of a person (like the pilot),
 # and the main character counts fully only from FOCUS_FULL of the frame (close-ups first; a child far
@@ -259,8 +267,8 @@ def load_people_pose(base, n):
     z = np.load(base + '_people.npz')
     pil = np.load(base + '_pilot.npy')
     notp = np.load(base + '_notperson.npy') if os.path.exists(base + '_notperson.npy') else np.zeros(len(pil))
-    sf = subject_file(base)
-    subj = np.load(sf) if os.path.exists(sf) else np.zeros(len(pil), bool)
+    subj = subject_rows(base)
+    subj = subj if subj is not None else np.zeros(len(pil), bool)
     mf = base + '_subject_' + MINOR_TAG[0] + '.npy' if MINOR_TAG[0] else ''
     minor = np.load(mf) if mf and os.path.exists(mf) else np.zeros(len(pil), bool)
     samples, fps = z['samples'], float(z['fps'])
@@ -313,17 +321,27 @@ def load_animals(base, n):
     return np.interp(np.arange(n), z['frame'], v)
 
 
-def subject_file(base):
-    return base + '_subject' + (f'_{SUBJECT_TAG[0]}' if SUBJECT_TAG[0] else '') + '.npy'
+def subject_file(base, tag=None):
+    tag = SUBJECT_TAG[0] if tag is None else tag
+    return base + '_subject' + (f'_{tag}' if tag else '') + '.npy'
+
+
+def subject_rows(base):
+    """Per people.npz row: the main character (people.py subject / who), or None without any file. A tag A+B+C
+    takes any of several people (a family, a couple: the film is about all of them)."""
+    masks = [np.load(subject_file(base, t)) for t in SUBJECT_TAG[0].split('+') if os.path.exists(subject_file(base, t))]
+    if not masks:
+        return None
+    return np.logical_or.reduce(masks)
 
 
 def load_subject(stab, proxy_dir, n):
     """Per frame 0/1: the main character (people.py subject) is in the picture, or zeros."""
     base = os.path.join(proxy_dir, os.path.splitext(os.path.basename(stab))[0]) if proxy_dir else ''
-    if not (base and os.path.exists(base + '_people.npz') and os.path.exists(subject_file(base))):
+    sb = subject_rows(base) if base and os.path.exists(base + '_people.npz') else None
+    if sb is None:
         return np.zeros(n)
     z = np.load(base + '_people.npz')
-    sb = np.load(subject_file(base))
     if os.path.exists(base + '_pilot.npy'):
         sb = sb & ~np.load(base + '_pilot.npy')
     has = np.zeros(len(z['samples']))
@@ -340,7 +358,8 @@ def load_stand_ins(stab, proxy_dir, n):
     z = np.load(base + '_people.npz')
     area = z['box'][:, 2] * z['box'][:, 3]
     k = np.searchsorted(z['samples'], z['frame'])
-    hero = np.load(subject_file(base)) if os.path.exists(subject_file(base)) else np.zeros(len(area), bool)
+    hero = subject_rows(base)
+    hero = hero if hero is not None else np.zeros(len(area), bool)
     peer = np.zeros(len(area), bool)
     for t in PEER_TAGS:
         p = base + '_subject_' + t + '.npy'
@@ -535,6 +554,8 @@ class Flight:
         e = np.pad(self.elev, h, mode='edge')
         rise = e[2 * h:] - e[:-2 * h]
         up_, _ = find_peaks(rise, height=PULLUP_DEG, distance=int(1.5 * fps))
+        if CARRIED[0]:                                           # a head looking down or up
+            dp, up_ = dp[:0], up_[:0]
         self._events = ([(c, rot1[c] / TRICK_DEG, ('loop', 'spin', 'roll')[int(np.argmax(ax1[c]))]) for c in tp]
                         + [(c, down[c] / DIVE_DEG, 'dive') for c in dp]
                         + [(c, rise[c] / PULLUP_DEG, 'pull-up') for c in up_])
@@ -571,7 +592,7 @@ class Flight:
         u &= ~still
         # landings: the approach and the touchdown before each stretch on the ground, marked (W_LANDING), not cut
         self.landing = np.zeros(n, bool)
-        for a in np.flatnonzero(np.diff(still.astype(int)) == 1) + 1:
+        for a in ([] if CARRIED[0] else np.flatnonzero(np.diff(still.astype(int)) == 1) + 1):
             self.landing[max(a - int(LANDING_S * fps), 0):a] = True
         if self.flow is not None:                                # blown-out / black picture
             br = self.flow['bright']
@@ -589,6 +610,9 @@ class Flight:
         parts = dict(lean=lean, rotation=uniform_filter1d(self.vis, int(0.5 * fps)), jerk=jerk)
         if self.flow is not None:
             parts['parallax'] = uniform_filter1d(self.flow['resid90'], int(0.5 * fps))
+        if 'speed' in SKILL_PARTS:                               # NaN without a fix (or without GPS at all)
+            sp = getattr(self, 'gps_speed', None)
+            parts['speed'] = sp if sp is not None else np.full(self.n, np.nan)
         return parts
 
     def set_scales(self, ref, ranks):
@@ -600,7 +624,7 @@ class Flight:
         self.accent_wide = np.convolve(a, tri, 'same')
         self.ca = csum(a)
         parts = self.raw_skill_parts()
-        rk = {k: prank(v, ranks[k]) for k, v in parts.items() if k in ranks}
+        rk = {k: np.where(np.isnan(v), 0.5, prank(v, ranks[k])) for k, v in parts.items() if k in ranks}
         rk['smooth'] = 1.0 - rk['jerk']
 
         def mix(w):
@@ -616,7 +640,7 @@ class Flight:
             ev += [(c, 1.2, 'pass') for c in pk]
             # descent from height: looking well down while everything is far away
             low = np.flatnonzero(uniform_filter1d(self.elev, int(2 * self.fps)) < -DESCENT_DEG)
-            for seg in (np.split(low, np.flatnonzero(np.diff(low) > 1) + 1) if low.size else []):
+            for seg in (np.split(low, np.flatnonzero(np.diff(low) > 1) + 1) if low.size and not CARRIED[0] else []):
                 if seg.size >= DESCENT_S * self.fps and par[seg].mean() < DESCENT_FAR:
                     ev.append((int(seg[seg.size // 2]), 1.2, 'descent'))
         tilt_ok = getattr(self, 'tilt_ok', None)                 # motion from the picture: see vis_motion.TRUST_INL
@@ -640,14 +664,45 @@ class Flight:
         self.msig = csum(sig)
 
 
+def load_gps_speed(render, n, fps, off=0):
+    """GPS ground speed (m/s, gps.py track) on the render's frame grid, NaN where there is no fix; None without a
+    track."""
+    p = os.path.splitext(render)[0] + '_gps.npz'
+    if not os.path.exists(p):
+        return None
+    z = np.load(p)
+    ok = z['fix'] > 0
+    if ok.sum() < 2:
+        return np.full(n, np.nan)
+    t = (np.arange(n) + off) / fps
+    sp = np.interp(t, z['t'][ok], z['speed'][ok])
+    sp = uniform_filter1d(sp, max(int(SPEED_SMOOTH_S * fps), 1))
+    # no fix for more than 2 s around a frame: unknown
+    gap = np.interp(t, z['t'], (~ok).astype(float))
+    return np.where((t < z['t'][ok][0] - 1) | (t > z['t'][ok][-1] + 1) | (gap > 0.99), np.nan, sp)
+
+
 def creation_time(path):
+    """When the recording of a file began. A GoPro chapter (GH02xxxx, GX03xxxx: the camera splits a recording at
+    4 GB) carries the start of the whole recording, so it begins after the chapters before it."""
     import datetime
+    import re
     with av.open(path) as c:
         t = c.metadata.get('creation_time') or c.streams.video[0].metadata.get('creation_time')
     try:
-        return datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
+        when = datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
     except (AttributeError, ValueError):
         return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc)
+    folder, name = os.path.split(path)
+    stem, ext = os.path.splitext(name)
+    m = re.fullmatch(r'(G[HX])(\d\d)(\d{4})', stem, re.I)
+    if m and int(m.group(2)) > 1:
+        before = [os.path.join(folder, f'{m.group(1)}{k:02d}{m.group(3)}{ext}') for k in range(1, int(m.group(2)))]
+        if all(os.path.exists(p) for p in before):
+            for p in before:
+                with av.open(p) as c:
+                    when += datetime.timedelta(seconds=float(c.duration) / 1e6)
+    return when
 
 
 def stabilized_before(path):
@@ -711,6 +766,7 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         fl.cimp = csum(load_stand_ins(render, proxy_dir, n))
         fl.can = csum(load_animals(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n) > 0)
         fl.beauty = load_beauty(render, n)
+        fl.gps_speed = load_gps_speed(render, n, fps, off)
         fl.offset, fl.when = off, creation_time(src)
         fl.day = fl.when.date().isoformat()
         out.append(fl)
@@ -782,10 +838,12 @@ def finish_flights(out):
     allh = np.concatenate([f.peak_heights for f in out])
     ref = np.percentile(allh, 75)
     ranks = {}
-    for k in ('parallax', 'lean', 'rotation', 'jerk'):
+    for k in ('parallax', 'lean', 'rotation', 'jerk', 'speed'):
         vals = [f.raw_skill_parts().get(k) for f in out]
         if all(v is not None for v in vals):
-            ranks[k] = np.sort(np.concatenate([v[f.usable] for v, f in zip(vals, out)]))
+            pool = np.concatenate([v[f.usable] for v, f in zip(vals, out)])
+            if np.isfinite(pool).any():
+                ranks[k] = np.sort(pool[np.isfinite(pool)])
     for f in out:
         if 'parallax' not in ranks and f.flow is not None:
             f.flow = None                                        # keep the score comparable
@@ -2004,6 +2062,12 @@ def make_parser():
     ap.add_argument('--animals', type=float, default=None,
                     help='an animal against a person of the same size (ANIMAL_WORTH); 0 when the footage has none (in a garden '
                          'YOLO sees them in cabbage beds and clothes on a porch)')
+    ap.add_argument('--carried', action='store_true',
+                    help='the camera is carried by a person (hand, helmet, chest), not flown: no lean in the piloting '
+                         'scores, no dives, pull-ups or descents, no landings (montage.py: camera = "carried")')
+    ap.add_argument('--speed', type=float, default=0.0,
+                    help='GPS ground speed (gps.py track) in the piloting scores: this share of the action score '
+                         'against parallax 0.45, rotation 0.30, lean 0.25 (half of it in the cinematic one), e.g. 0.5')
     ap.add_argument('--arcs', type=int, default=0,
                     help='this many scenes each show a whole climb and the way down (ascents), the highest that fit '
                          'a phrase at PIECE_MAX_SPEED, from different flights where possible')
@@ -2037,7 +2101,13 @@ def apply_options(a):
     PEER_TAGS[:] = ([t for t in (a.peers or '').split(',') if t and t != a.subject] +
                     ([a.subject + '_not'] if a.subject else []))
     W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED = a.people, a.fly, a.beauty, a.picked
-    CHAPTERS[:] = [int(v) for v in a.chapters.split(',')] if a.chapters else []
+    CARRIED[0] = a.carried
+    if a.carried:
+        SKILL_PARTS.pop('lean', None)
+        CINE_PARTS.pop('lean', None)
+    if a.speed:
+        SKILL_PARTS['speed'], CINE_PARTS['speed'] = a.speed, a.speed / 2
+    CHAPTERS[:] =[int(v) for v in a.chapters.split(',')] if a.chapters else []
     END_SET[0] = a.end is not None
     return np.random.default_rng(a.seed) if a.seed is not None else None
 
@@ -2074,6 +2144,8 @@ def main():
                           if f.trick_kind.count(k))
         print(f'  F{f.idx} {f.name}: {f.n / f.fps:.0f}s, usable {f.usable.mean() * 100:.0f}%, '
               f'{f.peak_frames.size} motion onsets, {kinds}, '
+              + (f'GPS {np.nanmedian(f.gps_speed) * 3.6:.0f} km/h, '
+                 if getattr(f, 'gps_speed', None) is not None and np.isfinite(f.gps_speed).any() else '') +
               f'proxy {"yes" if f.proxy else "no"}, flow {"yes" if f.flow is not None else "no"}, '
               f'looks {"yes" if f.look is not None else "no"}')
     print('music:')

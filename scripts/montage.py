@@ -14,12 +14,19 @@ paths in it); the job's name is its folder (or `name = ...`):
     footage = ["/path/to/footage"]           # folders (subfolders too) or single clips
     lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # only for log footage
     renders = 3                              # Gyroflow renders at once (default 3)
+    camera = "carried"                       # carried by a person (hand, helmet, chest), not flown: no pilot,
+                                             # no close passes, edit.py --carried (default "drone")
     people = true                            # poses, pilot, close passes (default true)
     objects = false                          # animals, vehicles (objects.py)
     places = true                            # CLIP frame embeddings for find:TEXT pieces (default true)
     beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
+    plain = ["snow up close"]                # what fills this footage without being a view (beauty.py --plain)
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
     args = ["--people", "4"]                 # edit.py options of every edit (before the edit's own)
+
+    [who]                                    # main characters by example (people.py who, in `features`):
+    marina = ["refs/marina.jpg", "GH010051:12.5:0.3"]   # screenshots in out/<job>/, or CLIP:SECONDS:X
+    _others = ["refs/lookalike.jpg"]         # _NAME: somebody else, kept apart
 
     [[edit]]
     name = "coach"
@@ -40,13 +47,16 @@ Steps:
             Gyroflow's export (gf_motion.py). A `_stabilized` clip without its original (stabilized before,
             no motion data left) is only scaled down (proxy.py); its motion comes from the picture
             (vis_motion.py in `features`, `hfov = 92` in the job file: the field of view of its picture)
-  features  per render: image motion and looks (analyze.py), people (people.py detect, pilotclip, passes),
+  features  per render: image motion and looks (analyze.py), GPS speed and altitude of GoPro clips (gps.py
+            track), people (people.py detect, pilotclip, passes),
             objects (objects.py), places (places.py embed),
-            beautiful views (beauty.py, with `beauty`)
-  edits     edit.py per [[edit]], previews 640 px 25 fps; redone when the job file is newer than the EDL.
+            beautiful views (beauty.py, with `beauty`); then timeline.py: all of it in out/<job>/timeline.sqlite,
+            one row per half second, for questions across the features (timeline.py out/<job> --sql ...)
+  edits     edit.py per [[edit]], previews 640 px wide, 25 fps; redone when the job file is newer than the EDL.
             "auto" length: 25 s + 0.25 x seconds the person is in view at 2 % of the frame or more + 0.5 x
             seconds at 6 % or more, 25..75 s (the tennis kids: 29..65 s)
-  qc        qc.py per edit -> <edit>_qc.txt
+  qc        qc.py per edit -> <edit>_qc.txt; edl_sheet.py: the shot sheet <edit>_sheet.jpg and the cut sheet
+            <edit>_cuts.jpg (+ _cuts.txt, its summary printed)
 Main characters (people.py subject / who / split) are a job's own business: run them before `edits`.
 """
 import argparse
@@ -203,21 +213,67 @@ def features(job, out, proxy):
     before = [r for c, r in zip(originals(out), renders) if stabilized_before(c)]
     if before:                                                   # their motion, from the picture
         run([os.path.join(HERE, 'vis_motion.py')] + before + (['--hfov', job['hfov']] if job.get('hfov') else []), log)
+    gopro = [c for c in originals(out) if not stabilized_before(c) and has_track(c, b'gpmd')]
+    if gopro:                                                    # speed and altitude (gps.py track)
+        lst = os.path.join(out, 'gopro.txt')
+        open(lst, 'w', encoding='utf-8').write('\n'.join(gopro) + '\n')
+        run([os.path.join(HERE, 'gps.py'), 'track', '--list', lst, '--proxy-dir', proxy], log)
     if job.get('people', True):
         run([os.path.join(HERE, 'people.py'), 'detect'] + renders +
             ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--objects', os.path.join(yolo, 'yolov8s.pt')], log)
-        run([os.path.join(HERE, 'people.py'), 'pilotclip'] + renders +
-            ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'pilot_check.jpg')], log)
-        run([os.path.join(HERE, 'people.py'), 'passes'] + renders +
-            ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--sheet', os.path.join(out, 'passes_check.jpg')], log)
+        if carried(job):                                         # nobody pilots a carried camera
+            for r in renders:
+                b = os.path.splitext(r)[0]
+                if os.path.exists(b + '_people.npz'):
+                    np.save(b + '_pilot.npy', np.zeros(len(np.load(b + '_people.npz')['frame']), bool))
+        else:
+            run([os.path.join(HERE, 'people.py'), 'pilotclip'] + renders +
+                ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'pilot_check.jpg')], log)
+            run([os.path.join(HERE, 'people.py'), 'passes'] + renders +
+                ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--sheet', os.path.join(out, 'passes_check.jpg')],
+                log)
+    if job.get('who') and job.get('people', True):               # main characters by example
+        who(job, out, renders, log)
     if job.get('objects', False):
         run([os.path.join(HERE, 'objects.py'), '--weights', os.path.join(yolo, 'yolov8s.pt')] + renders, log)
     if job.get('places', True):
         run([os.path.join(HERE, 'places.py'), 'embed'] + renders + ['--clip-cache', os.path.join(MODELS, 'clip')], log)
     if job.get('beauty'):                                        # beautiful views in the job's words (edit.py --beauty)
         run([os.path.join(HERE, 'beauty.py')] + renders + [x for t in job['beauty'] for x in ('--text', t)] +
+            [x for t in job.get('plain', []) for x in ('--plain', t)] +
             ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'beauty_check.jpg')], log)
+    run([os.path.join(HERE, 'timeline.py'), out, '--proxy-dir', proxy, '--clip-cache', os.path.join(MODELS, 'clip')],
+        log)                                                     # one table of it all: out/<job>/timeline.sqlite
     print(f'features: done (log {log}); check {os.path.join(out, "pilot_check.jpg")} and passes_check.jpg once')
+
+
+def who(job, out, renders, log):
+    """people.py who with the job's `[who]` references: name = [images (paths in the job folder: screenshots the
+    owner sent) or CLIP:SECONDS:X]; a name starting with _ is somebody else (a look-alike to keep apart). Run
+    again only when the references change (out/<job>/who.txt) -> <render>_subject_NAME.npy, who_check.jpg.
+    Before it, people.py track: every person through every other frame, so that a screenshot found in the footage
+    gives that person's whole track as references (people.py, find_who_tracked)."""
+    if run([os.path.join(HERE, 'people.py'), 'track'] + renders +
+           ['--weights', os.path.join(MODELS, 'yolo', 'yolov8s-pose.pt')], log):
+        raise SystemExit(f'people.py track failed: see {log}')
+    refs = ['tracked']
+    for name, items in job['who'].items():
+        for x in ([items] if isinstance(items, str) else items):
+            p = os.path.join(out, x)
+            refs.append(f'{name}={p if os.path.exists(p) else x}')
+    stamp = os.path.join(out, 'who.txt')
+    done = os.path.exists(stamp) and open(stamp, encoding='utf-8').read().split('\n') == refs and all(
+        os.path.exists(os.path.splitext(r)[0] + f'_subject_{n}.npy') for r in renders for n in job['who']
+        if not n.startswith('_'))
+    if done:
+        return
+    refs = refs[1:]
+    rc = run([os.path.join(HERE, 'people.py'), 'who'] + renders + [x for r in refs for x in ('--ref', r)] +
+             ['--originals', os.path.join(out, 'originals.txt'), '--ref-dir', os.path.join(out, 'refs'),
+              '--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'who_check.jpg')], log)
+    if rc:
+        raise SystemExit(f'people.py who failed: see {log}')
+    open(stamp, 'w', encoding='utf-8').write('\n'.join(['tracked'] + refs))
 
 
 # ------------------------------------------------------------------------------------------- edits
@@ -243,10 +299,18 @@ def auto_target(proxy, tag):
     return t
 
 
+def carried(job):
+    """The camera of the job is carried by a person (hand, helmet, chest), not flown: `camera = "carried"`."""
+    cam = job.get('camera', 'drone')
+    if cam not in ('drone', 'carried'):
+        raise SystemExit(f'camera = {cam!r}: "drone" (default) or "carried"')
+    return cam == 'carried'
+
+
 def edit_args(job, e):
     """edit.py options of an edit: the job's `args` (all edits: the people weight, themes of the shoot),
-    then the edit's own (a later value wins)."""
-    return [str(a) for a in job.get('args', []) + e.get('args', [])]
+    then the edit's own (a later value wins); --carried for a carried camera."""
+    return (['--carried'] if carried(job) else []) + [str(a) for a in job.get('args', []) + e.get('args', [])]
 
 
 def check_edits(job):
@@ -277,6 +341,16 @@ def edit_clips(job, e):
     return [s for s, st in zip(srcs, stems) if any(fnmatch.fnmatchcase(st, p.lower()) for p in e['clips'])]
 
 
+def preview_height(proxy):
+    """Previews are PROXY_W wide whatever the footage's aspect: 480 for 4:3, 360 for 16:9."""
+    r = next(iter(sorted(glob.glob(os.path.join(proxy, '*_stabilized.mp4')))), None)
+    if r is None:
+        return 480
+    with av.open(r) as c:
+        cc = c.streams.video[0].codec_context
+        return int(round(PROXY_W * cc.height / cc.width / 2)) * 2
+
+
 def edits(job, job_path, out, proxy, cache, plan_only=False):
     series = []
     for e in job.get('edit', []):
@@ -299,7 +373,8 @@ def edits(job, job_path, out, proxy, cache, plan_only=False):
                 with open(originals, 'w', encoding='utf-8') as fh:
                     fh.write(''.join(s + '\n' for s in edit_clips(job, e)))
             cmd = [os.path.join(HERE, 'edit.py'), e['music'], '-o', dst, '--originals', originals,
-                   '--proxy-dir', proxy, '--cache', cache, '--target', target, '--height', 480, '--fps', 25]
+                   '--proxy-dir', proxy, '--cache', cache, '--target', target, '--height', preview_height(proxy),
+                   '--fps', 25]
             if e.get('bpm'):
                 cmd += ['--bpm', e['bpm']]
             if job.get('lut'):
@@ -326,6 +401,12 @@ def qc(job, out):
             open(os.path.join(out, name, name + '_qc.txt'), 'w', encoding='utf-8').write(r.stdout)
             warn = [x for x in r.stdout.splitlines() if x.startswith('WARN')]
             print(f'  {name}: {len(warn)} WARN' + ''.join(f'\n    {w}' for w in warn))
+            sheet = [sys.executable, os.path.join(HERE, 'edl_sheet.py'), edl]
+            subprocess.run(sheet + [os.path.join(out, name, name + '_sheet.jpg')], capture_output=True)
+            r = subprocess.run(sheet + [os.path.join(out, name, name + '_cuts.jpg'), '--cuts'], capture_output=True,
+                               text=True)
+            open(os.path.join(out, name, name + '_cuts.txt'), 'w', encoding='utf-8').write(r.stdout + r.stderr)
+            print(f'    {(r.stdout.strip().splitlines() or ["cut sheet failed, see _cuts.txt"])[-1]}')
 
 
 def final(job, out, names, size):
