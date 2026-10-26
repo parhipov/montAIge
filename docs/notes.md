@@ -377,6 +377,13 @@ cut, and two hits before that cut falling on level flight.
   scene after it.
 - Per-shot Gyroflow settings: horizon lock off for flips.
 - An EDL / OTIO export for finishing by hand.
+- Visual beats from people (Davis & Agrawala 2018: motion has beats that can be put on the music's): a limb
+  stopping against its own body (wrists and ankles from the hips, in body heights), so the camera's motion drops
+  out and no flow is needed. The cost is the tracker with poses (BoT-SORT, YOLOv8s-pose every other frame):
+  22 frames/s on the RTX 3050, 40 min per hour of 30 fps footage, 67 at 50 fps, unless a job tracks people
+  anyway (screenshots of its main characters). On a minute of an FPV drone chasing children warming up on a
+  tennis court the strongest "beats" were running steps and bodies cut by the frame's edge: nothing to cut on.
+  Worth trying on footage of accented moves towards a steadier camera (a serve, a jump), on tracks the job has.
 - The footage's own sound, in words (CLAP, the audio twin of CLIP): laughter, a splash, shouting as `find:`
   and themes (Insta360 and GoPro listen to it). Carried cameras only: a drone hears its propellers. No footage
   to try it on yet.
