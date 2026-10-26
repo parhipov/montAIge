@@ -59,7 +59,12 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
 - The owner watches as it goes: keep steps short, say what is running, take comments in between.
 - A new job in a new session: every request re-reads the whole conversation, and a job done late in a long
-  session cost 3.5 times as many tokens as it would on its own.
+  session cost 3.5 times as many tokens as it would on its own. What enters the context is paid for on every
+  later step: numbers first (poses, CLIP, `timeline.py`), then one picture to confirm; no progress output or long
+  dumps. No `/compact`: a summary loses the exact seconds and the reasons.
+- Searching the footage for a moment ("where does he dance", the jumps, a calm ending with them in view) goes to a
+  subagent with the clips, the tools and the answer wanted (CLIP:SEC ranges, a line each): its frame sheets stay in
+  its context. One edit: 33M tokens, of which the search for one dancing boy ~8.5M in the main context.
 - A toolkit, not a fixed pipeline: `montage.py` does what every job needs; locations, activities, exports,
   climbs and themes are called when a job asks for them. A one-off can stay a one-off script in the job.
 - What a job teaches goes into `scripts/` as a general rule (a sharper definition, an option), never as a
