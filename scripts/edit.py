@@ -138,6 +138,10 @@ FOCUS_OTHERS, FOCUS, FOCUS_FULL = 0.3, [False], 0.10
 # ... and a shot with the main character in less than FOCUS_PRESENT of it is empty there (W_EMPTY), however
 # many other children it shows: the first per-child films had other kids in 4 of 19 shots, the ending too
 FOCUS_PRESENT = 0.5
+# --focus-min A: the main character is in the picture only at A of the frame or more (default 0: at any size). A
+# film about three people on crowded slopes, "only where it is clearly them": at any size crowds at a lift with one
+# of them far away counted as shots of them (Arkhyz, 3 of 19 shots)
+FOCUS_MIN = [0.0]
 # ... but people of another kind (adults, the coach) or the place make a fair cutaway: without the main
 # character a shot pays only W_AWAY; what it must not do is show a look-alike instead (another child of the
 # series, or someone `people.py split` dropped as dressed like them: --peers, <subject>_not by default).
@@ -186,6 +190,8 @@ GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.
 # speed ramps (relative to the shot's base speed) and the hero ramp
 RAMP_LO, RAMP_HI, ABS_LO, ABS_HI, W_SNAP, W_DEV = 0.7, 1.4, 0.5, 1.7, 1.0, 6.0
 PIECE_MAX_SPEED, PIECE_MIN_SPEED = ABS_HI, 0.8
+PICKUP_MIN_S = 1.5      # a pickup before the first phrase shorter than this joins the first shot (a 0.7 s flash)
+PICKUP_MIN_S = 1.5       # a pickup before the first phrase shorter than this joins the first shot (a 0.7 s flash)
 HERO_RUSH, HERO_SLOW, HERO_AT = 1.4, 0.5, 2.0      # beat 0 fast, beats 1-2 slow, manoeuvre on beat 2
 BASE_SPEED = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}
 BASE_SPEED_PACE = {1: 1.1, 2: 1.15, 3: 1.2}         # --pace: faster flying, hesitation hidden (nov2023)
@@ -351,6 +357,8 @@ def load_subject(stab, proxy_dir, n):
     z = np.load(base + '_people.npz')
     if os.path.exists(base + '_pilot.npy'):
         sb = sb & ~np.load(base + '_pilot.npy')
+    if FOCUS_MIN[0]:
+        sb = sb & (z['box'][:, 2] * z['box'][:, 3] >= FOCUS_MIN[0])
     has = np.zeros(len(z['samples']))
     has[np.searchsorted(z['samples'], z['frame'])[sb]] = 1
     return np.interp(np.arange(n), z['samples'], has)
@@ -2050,6 +2058,9 @@ def make_parser():
                     help='--focus: comma-separated subject tags of look-alikes that must not stand in for the main '
                          'character (other children of the series); <subject>_not is always one')
     ap.add_argument('--focus', action='store_true', help='an edit about the --subject: others count FOCUS_OTHERS')
+    ap.add_argument('--focus-min', type=float, default=0.0,
+                    help='the main character is in a shot only at this share of the frame or more (e.g. 0.03: clearly '
+                         'them, not a figure far away in a crowd); default any size')
     ap.add_argument('--lively', action='store_true', help='4-beat shots in loud phrases (PATTERNS_LIVELY)')
     ap.add_argument('--long', action='store_true', help='a shot per 16-beat phrase: whole flights (PATTERNS_LONG)')
     ap.add_argument('--no-hits', action='store_true',
@@ -2114,6 +2125,7 @@ def apply_options(a):
     SUBJECT_TAG[0] = a.subject
     MINOR_TAG[0] = a.minor
     FOCUS[0] = a.focus and bool(a.subject)
+    FOCUS_MIN[0] = a.focus_min
     PEER_TAGS[:] = ([t for t in (a.peers or '').split(',') if t and t != a.subject] +
                     ([a.subject + '_not'] if a.subject else []))
     W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED = a.people, a.fly, a.beauty, a.picked
@@ -2214,10 +2226,12 @@ def main():
         musts.append((f.idx, lo, hi, end_at, first))
     if a.arcs:
         musts += pick_arcs(flights, m, a.arcs, musts)
-    if any(x[4] for x in musts) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
+    short_pickup = scenes[0]['kind'] == 'pickup' and sum(
+        x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] < PICKUP_MIN_S
+    if (any(x[4] for x in musts) or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
             not (scenes[1]['hero'] or scenes[1]['fly']):
         # the opening piece opens the edit: the pickup before the first phrase joins that phrase's first shot
-        # (it took the opening shot otherwise, and the piece came second)
+        # (it took the opening shot otherwise, and the piece came second); so does a pickup too short to be a shot
         p, s1 = scenes[0]['shots'][0], scenes[1]['shots']
         s1[0] = dict(merged([p, s1[0]]), cls=s1[0]['cls'], speed=s1[0]['speed'], q_music=s1[0]['q_music'])
         scenes = scenes[1:]
