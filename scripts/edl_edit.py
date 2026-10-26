@@ -3,6 +3,8 @@
     python edl_edit.py EDIT_edl.json --end-from K -o OUT.mp4
     python edl_edit.py EDIT_edl.json --replace K [--replace K ...] --job out/JOB/job.toml --edit NAME -o OUT.mp4
                        [--clip CLIP] [--seed N] [-- EDIT.PY OPTIONS]
+    python edl_edit.py EDIT_edl.json --put K.J CLIP:SEC -o OUT.mp4
+    python edl_edit.py EDIT_edl.json --match CLIP -o OUT.mp4
 
 --end-from K: the ending takes over from scene K (0-based, as in edl_sheet.py): scenes K .. the one before the last
 leave, and the last shot starts at scene K's start, earlier in its own clip, at 1x, up to the same last frame. If
@@ -14,6 +16,12 @@ scoring, with the edit's own options from the job file, or given after --), agai
 stands: the footage of the other scenes stays out, and so does the scene's own; their looks, movements and themes
 count as placed. Its recording day first, as in edit.py's chapters. --clip keeps the search to one clip; --seed N
 gives another candidate.
+
+--put K.J CLIP:SEC: shot J of scene K shows CLIP from SEC on, at 1x, for its own stretch of music: a moment the
+owner named ("the fly-through from the other edit, here"); its grade is found again.
+
+--match CLIP: every other clip's colour matched to CLIP's (edit.py --match: two cameras of one shoot); every shot's
+grade is found again.
 
 Writes OUT_edl.json (what final.py takes; OUT_music.wav too when the edit ends earlier) and the preview OUT.mp4
 like edit.py's (proxies, 25 fps, the EDL's LUT, grade and zoom).
@@ -119,13 +127,67 @@ def new_speeds(x, f, scenes, o):
     edit.constant_speed(x)
 
 
-def replace(e, ks, o, cache, clip=None):
-    """The EDL with scenes ks found again (see the module notes)."""
-    rng = edit.apply_options(o)
+def load_flights(e, cache):
+    """edit.py's flights of the EDL's footage, each with the EDL's colour match."""
     fl = sorted(e['flights'], key=lambda f: f['idx'])
     flights = edit.find_flights_list([f['original'] for f in fl], cache, os.path.dirname(fl[0]['render']))
     if [os.path.basename(f.src) for f in flights] != [os.path.basename(f['original']) for f in fl]:
         raise SystemExit('the footage is not the one the EDL was made from')
+    for f, g in zip(flights, fl):
+        f.match = g.get('match')
+    return flights
+
+
+def lut_of(e):
+    return edit.CubeLUT(e['lut']) if e.get('lut') else None
+
+
+def put(e, k, j, spec, cache):
+    """The EDL with shot j of scene k showing CLIP:SEC on at 1x (see the module notes)."""
+    flights = load_flights(e, cache)
+    stem, sec = spec.rsplit(':', 1)
+    f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
+    if f is None:
+        raise SystemExit(f'--put {spec}: no such clip in the EDL')
+    scenes = [dict(s, shots=[dict(x) for x in s['shots']]) for s in e['scenes']]
+    if not (0 <= k < len(scenes) and 0 <= j < len(scenes[k]['shots'])):
+        raise SystemExit(f'--put {k}.{j}: no such shot')
+    x = scenes[k]['shots'][j]
+    a, n = int(round(float(sec) * f.fps)), int(round((x['t1'] - x['t0']) * f.fps))
+    if a < 0 or a + n > f.n:
+        raise SystemExit(f'--put {spec}: the clip ends before the shot does')
+    was = f'{flights[x["flight"]].name} {x["src_frame"] / flights[x["flight"]].fps:.1f}s'
+    for y in (y for s in scenes for y in s['shots'] if y is not x and y['flight'] == f.idx):
+        if a < y['src_frame'] + y['src_frames'] and y['src_frame'] < a + n:
+            print(f'  note: the shot at {y["t0"]:.1f}s shows some of the same footage')
+    x.update(flight=f.idx, src_frame=a, src_frames=n, speed=1.0, hero_ramp=False, src_t0=a / f.fps)
+    for key in ('theme', 'fly_kind', 'hero_kind', 'hero_frame'):
+        x.pop(key, None)
+    edit.constant_speed(x)
+    if x.get('grade'):
+        x['grade'] = edit.shot_grade(f, a, n, lut_of(e))
+    if all(y['flight'] == f.idx for y in scenes[k]['shots']):
+        scenes[k]['flight'] = f.idx
+    print(f'scene {k} shot {j} ({x["t0"]:.1f}-{x["t1"]:.1f}s): {was} -> {f.name} {a / f.fps:.1f}-{(a + n) / f.fps:.1f}s')
+    return dict(e, scenes=scenes)
+
+
+def match(e, ref, cache):
+    """The EDL with every clip's colour matched to ref's, every shot graded again (see the module notes)."""
+    flights = load_flights(e, cache)
+    lut = lut_of(e)
+    edit.colour_match(flights, ref, lut)
+    scenes = [dict(s, shots=[dict(x) for x in s['shots']]) for s in e['scenes']]
+    if any(x.get('grade') for s in scenes for x in s['shots']):
+        edit.grade_all(scenes, flights, lut)
+    fl = sorted(e['flights'], key=lambda g: g['idx'])
+    return dict(e, scenes=scenes, flights=[dict(g, match=f.match) for g, f in zip(fl, flights)])
+
+
+def replace(e, ks, o, cache, clip=None):
+    """The EDL with scenes ks found again (see the module notes)."""
+    rng = edit.apply_options(o)
+    flights = load_flights(e, cache)
     edit.prepare_flights(flights, o)
     m = edit.analyse_music(e['music'], e['bpm'])
     acc, d0 = m['acc'], m['downbeat']
@@ -215,7 +277,8 @@ def render_edl(e, out, height=480, fps=25):
     for f in e['flights']:
         p = f.get('proxy') or f['render']
         n, _ = edit.frame_count(p)
-        flights[f['idx']] = types.SimpleNamespace(idx=f['idx'], proxy=p, stab=f['render'], fps=f['fps'], n=n)
+        flights[f['idx']] = types.SimpleNamespace(idx=f['idx'], proxy=p, stab=f['render'], fps=f['fps'], n=n,
+                                                  match=f.get('match'))
     m = edit.analyse_music(e['music'], e['bpm'])
     m['path'] = e['music']
     lut = edit.CubeLUT(e['lut']) if e.get('lut') else None
@@ -231,6 +294,9 @@ def main():
     ap.add_argument('--job', default=None, help="--replace: the job file with the edit's options")
     ap.add_argument('--edit', default=None, help='--replace: the edit in the job file')
     ap.add_argument('--clip', default=None, help='--replace: look in this clip only')
+    ap.add_argument('--put', nargs=2, metavar=('K.J', 'CLIP:SEC'), default=None,
+                    help='shot J of scene K (0-based) shows CLIP from SEC at 1x')
+    ap.add_argument('--match', default=None, metavar='CLIP', help="every other clip's colour matched to CLIP's")
     ap.add_argument('--seed', type=int, default=None, help='--replace: another candidate')
     ap.add_argument('--cache', default=os.path.join(paths.ROOT, 'out', 'diagnostics', '.telemetry_cache'))
     ap.add_argument('-o', '--out', required=True, help='the preview; _edl.json next to it')
@@ -246,11 +312,18 @@ def main():
     extra = [x for x in extra if x != '--']
     with open(a.edl, encoding='utf-8') as fh:
         e = json.load(fh)
-    if (a.end_from is None) == (not a.replace):
-        raise SystemExit('one change at a time: --end-from K or --replace K')
+    if sum((a.end_from is not None, bool(a.replace), a.put is not None, a.match is not None)) != 1:
+        raise SystemExit('one change at a time: --end-from K, --replace K, --put K.J CLIP:SEC or --match CLIP')
     base = os.path.splitext(os.path.abspath(a.out))[0]
     os.makedirs(os.path.dirname(base), exist_ok=True)
-    if a.replace:
+    if a.put:
+        k, j = (int(v) for v in a.put[0].split('.'))
+        e2 = put(e, k, j, a.put[1], a.cache)
+        e2['edl_edit'] = dict(from_edl=a.edl, put=a.put)
+    elif a.match:
+        e2 = match(e, a.match, a.cache)
+        e2['edl_edit'] = dict(from_edl=a.edl, match=a.match)
+    elif a.replace:
         bad = [k for k in a.replace if not 0 <= k < len(e['scenes'])]
         if bad:
             raise SystemExit(f'--replace {bad}: scenes 0..{len(e["scenes"]) - 1}')

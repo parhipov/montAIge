@@ -8,8 +8,8 @@
 2. each piece is aligned to the full-clip small render the EDL frames refer to, by
    comparing frames (Gyroflow's trim start is a few frames off the millisecond value);
 3. the pieces are cut to the music, with a short dissolve where the recording day changes
-   and an optional date caption at the start of each day; the EDL's LUT and grade (edit.py --lut,
-   --grade auto, keys through each shot) are applied on the GPU to 16-bit frames: log footage gets
+   and an optional date caption at the start of each day; the EDL's LUT, colour match and grade (edit.py
+   --lut, --match, --grade auto, keys through each shot) are applied on the GPU to 16-bit frames: log footage gets
    10-bit pieces (--pieces hevc10, the default with a LUT), so nothing bands before the LUT.
    Encoded with NVENC (hevc_nvenc by default). GPU only, run it with GPU_PY.
 """
@@ -86,7 +86,8 @@ def align(piece, proxy, expect, search=4, probe=60):
 
 
 class GpuGrade:
-    """The EDL's LUT (trilinear in the 3D table) and a shot's grade, on the GPU, for 8- or 16-bit RGB."""
+    """The EDL's LUT (trilinear in the 3D table), a clip's colour match (edit.py --match) and a shot's grade, on
+    the GPU, for 8- or 16-bit RGB."""
     def __init__(self, lut_path):
         import torch
         import gpu
@@ -98,7 +99,7 @@ class GpuGrade:
             self.dmin = torch.tensor(lut.dmin, dtype=torch.float32, device=self.dev)
             self.dmax = torch.tensor(lut.dmax, dtype=torch.float32, device=self.dev)
 
-    def __call__(self, img, g):
+    def __call__(self, img, g, match=None):
         torch = self.torch
         x = torch.from_numpy(img.astype(np.float32) if img.dtype == np.uint16 else img).to(self.dev).float()
         x = x / (65535.0 if img.dtype == np.uint16 else 255.0)
@@ -107,6 +108,16 @@ class GpuGrade:
             x = torch.nn.functional.grid_sample(self.vol, grid, mode='bilinear', padding_mode='border',
                                                 align_corners=True)[0, :, 0].permute(1, 2, 0)
         v = x * 255.0
+        if match:
+            if isinstance(match, dict):                          # its luma curve (bf.apply_tone), then its colours
+                cv = torch.tensor(match['curve'], dtype=torch.float32, device=self.dev)
+                y = (v @ torch.tensor([0.2126, 0.7152, 0.0722], device=self.dev)).clamp(0, 255)
+                lo = y.floor().long().clamp(max=254)
+                k = torch.lerp(cv[lo], cv[lo + 1], y - lo) / y.clamp(min=1.0)
+                v = (v * k[..., None]).clamp(0, 255)
+                match = match['rgb']
+            mt = torch.tensor(match, dtype=torch.float32, device=self.dev)
+            v = v @ mt[:, :3].T + mt[:, 3]
         if g:
             v = (v - g[0]) * torch.tensor(g[1:], dtype=torch.float32, device=self.dev) + bf.GRADE_BLACK
         return v.clamp(0, 255).round().to(torch.uint8).cpu().numpy()
@@ -204,7 +215,7 @@ def main():
     ap.add_argument('--crop-top', type=float, default=0.0)
     ap.add_argument('--zoom', type=float, default=None, help="centre cut 1/ZOOM (default: the EDL's, as in the preview)")
     ap.add_argument('--pieces', default=None, help='folder for the Gyroflow pieces (default: next to OUT)')
-    ap.add_argument('--no-grade', action='store_true', help="ignore the EDL's LUT and per-shot grade")
+    ap.add_argument('--no-grade', action='store_true', help="ignore the EDL's LUT, colour match and per-shot grade")
     ap.add_argument('--pieces-codec', choices=('h264', 'hevc10'), default=None,
                     help='Gyroflow pieces: hevc10 (10-bit, the default with a LUT) or h264')
     ap.add_argument('--encoder', default='hevc_nvenc', help='hevc_nvenc, h264_nvenc or libx264')
@@ -338,7 +349,7 @@ def main():
         slow = (src_at(t - x['t0'] + 0.02) - src_at(t - x['t0'] - 0.02)) / 0.04 < bf.SLOW_BLEND * rd.fps
         img = rd.at(max(src - starts[(fi, j)], 0.0), slow)
         g = None if a.no_grade else bf.grade_at(x.get('grade'), (src - x['src_frame']) / max(x['src_frames'], 1))
-        return grade(img, g)
+        return grade(img, g, None if a.no_grade else flights[fi].get('match'))
 
     # a chapter is a day, or a session of one ('2022-08-06 19:23', edit.py --sessions): a caption per day
     dates = [(x['day'] or '')[:10] for x in shots]

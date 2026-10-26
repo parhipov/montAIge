@@ -1,7 +1,8 @@
 # Examples
 
-Every job so far, in order. Each file: the footage, what the owner asked for, the edits with their numbers,
-the owner's comments, and what the job taught (now in `scripts/` and [../notes.md](../notes.md)).
+The early jobs, in order (later ones stay in `out/<job>/example.md`, not in git). Each file: the footage, what
+the owner asked for, the edits with their numbers, the owner's comments, and what the job taught (now in
+`scripts/` and [../notes.md](../notes.md)).
 
 | job | footage | edits |
 |---|---|---|

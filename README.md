@@ -174,7 +174,7 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `timeline.py` | every feature in one SQLite table, a row per half second: questions across them in one query |
 | `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
 | `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
-| `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, the ending taking over |
+| `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, a named moment put in a shot, the ending taking over, the colour of two cameras matched |
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
 | `music_check.py` | checks a track: constant tempo, phrases |

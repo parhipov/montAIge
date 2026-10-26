@@ -3,14 +3,14 @@
 You edit footage to music with the scripts in `scripts/`. The owner of the footage says what it is and what
 they want; you run the steps, judge from the numbers the scripts print, render previews, and change the edit
 after their comments. `docs/notes.md` explains the methods and the numbers behind them; `docs/examples/` has
-every job done so far, with the owner's comments.
+the early jobs with the owner's comments (later ones stay local, `out/<job>/example.md`).
 
 ## Layout
 
 ```
 scripts/                    the toolset
 docs/notes.md               methods, measurements, ideas not done yet
-docs/examples/<job>.md      one file per job: footage, task, edits, comments, what it taught
+docs/examples/<job>.md      early jobs: footage, task, edits, comments, what it taught (new ones: out/<job>/)
 models/                     inputs that are not footage (not in git): music/, luts/, yolo/, clip/, faces/
 out/<job>/                  a job (not in git): job.toml, previews, EDLs, QC, a snapshot of scripts/
 out/diagnostics/            proxy_<job>/ (stabilized proxies and their features), .telemetry_cache/
@@ -137,8 +137,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`); a piece longer than its phrase plays
   faster, up to 1.7x. The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
-  phrase takes the scene before it too (not a hero).
-- Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z` (kept in the EDL for `final.py`).
+  phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
+  track's last hit, the music after it as the ending.
+- Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
+  clip's colour matched to that clip's) (kept in the EDL for `final.py`).
 - `--plan-only`, `--debug`, `--height`, `--fps`.
 
 ## Other tools
@@ -161,12 +163,17 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg [--cuts]`, `final.py`, `dji_join.py`,
   `djimeta.py`.
 - `edl_edit.py`: a comment on one scene of a finished edit: `--replace K` (the same music, the rest frame for
-  frame), `--end-from K` (the ending takes over). The music is never cut: that moves every later scene.
+  frame), `--end-from K` (the ending takes over), `--put K.J CLIP:SEC` (a moment the owner names, in shot J of
+  scene K at 1x), `--match CLIP` (the colour of the cameras matched). The music is never cut: that moves every
+  later scene.
 - `vis_motion.py`: camera motion from the picture of a clip stabilized elsewhere (a `_stabilized` export
   without its original: montage.py takes it in, scales it down with `proxy.py`, finals cut it directly).
 
 ## After a job
 
-Add `docs/examples/<job>.md` (footage, task, edits with their numbers, the owner's comments, what it
-taught), put general lessons into `docs/notes.md` and `scripts/`, keep the job's `scripts/` snapshot in
-`out/<job>/`. Docs and code comments in English; `README.ru.md` is the Russian twin of `README.md`.
+Everything general that will be useful again goes into the repository: rules into `scripts/`, measurements and
+methods into `docs/notes.md`, new options into this file and the READMEs. Session data does not, unless the owner
+says so: the job's write-up (footage, task, edits with their numbers, the owner's comments, what it taught) stays
+in `out/<job>/example.md` (not in git), and notes give the numbers without linking a job. Keep the job's
+`scripts/` snapshot in `out/<job>/`. Docs and code comments in English; `README.ru.md` is the Russian twin of
+`README.md`.

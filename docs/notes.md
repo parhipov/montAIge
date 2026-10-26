@@ -57,9 +57,19 @@ renders (same frame count as the original), telemetry from the original.
 - **Attitude.** In DJI's fused frame world up is −Z for `q_cam`. Image-down agrees with world down on
   96-99 % of frames; the camera is upside down on 0.2-2.7 % (flips). On the ground the camera elevation is
   −2..+11°, so "nose down" in the air means speed or a dive, and image parallax tells which. GoPro motion comes
-  through Gyroflow's export (`--export-metadata 3`, `org_quat`), also world up −Z.
-- **Trimming.** The first 3 s and the last 5 s go; a spike over 2000°/s near the end is a crash and
+  through Gyroflow's export (`--export-metadata 3`, `org_quat`), also world up −Z; so does a camera that logs
+  its gyro to a `.gcsv` beside the clip (RunCam Thumb Pro W: 1000 Hz, its lens profile named in the header,
+  Gyroflow's sync within 20 ms).
+- **Trimming.** The first 3 s and the last 5 s go; a spike over 1300°/s near the end is a crash and
   everything after it goes; so does any 2 s with neither vibration nor rotation, and blown-out or black frames.
+  Crashes: manoeuvres peaked at 900-950°/s in 136 clips of nine jobs (the pilots' rate limit), five mid-flight
+  peaks of 1590-1930 were all crashes, and a RunCam Thumb's gyro stops at 1000°/s per axis, so its crashes peaked
+  at 1620-1730 and never met the old 2000; between 1000 and 1300 one was a crash, one a fast turn inside a shed.
+  Off the ground (a crash counts as on it) for under 20 s between two stretches on it is the quad flipped back
+  onto its props (the turtle tumble read as a loop) or set back by hand; after the last stretch on the ground
+  in a clip's last 20 s the pilot carries the quad back (a hand over the lens read as a person filling the
+  frame). Manoeuvres in the 4 s before a stretch on the ground are the landing (braking, the flop). Sharpness for
+  "the lens in the dirt": no, a dim shed was as blurry by the Laplacian.
 - **Motion onsets** are peaks of the derivative of the visible (1.5 Hz low-passed) rotation rate; they are
   what lands on beats. At random an onset falls within ±40 ms of a beat ~13 % of the time at 101 BPM.
 - **Manoeuvre kinds:** roll, spin or loop (more than 250° in 1 s, by axis), dive (camera more than 45° below
@@ -122,7 +132,9 @@ renders (same frame count as the original), telemetry from the original.
   seconds before a take-off read carried (1.1-1.2: on the ground or in a hand), which they were. A clip without
   an accelerometer (DJI, stabilized elsewhere) is flown. edit.py `--cameras` makes every carried rule per clip
   (trims, landings, lean, dives, the ground, views opening); montage.py looks for the pilot and close passes in
-  the flown clips only.
+  the flown clips only. Missed once: a gentle cinewhoop with a soft-mounted GoPro (moose) read carried, 1.06 over
+  the clip with 28 s on the grass before the take-off, 0.6-1.8 per 10 s in the air, and no walking cadence
+  (1.5-2.5 Hz) either; the job file said `camera = "drone"`.
 - **GPS speed and climb** (`gps.py track`, GPS5/GPS9 every ~18th of a second): what a carried camera's action
   is. `--speed W` puts the ground speed into the piloting score (ranked over all footage, the middle rank where
   there is no fix). The climb tells a lift from a run: of 66 min of a ski holiday, one chairlift ride rose
@@ -193,8 +205,12 @@ which owners call beautiful: those come in as editor's pieces.
   phrase; longer than the phrase, it plays faster, up to 1.7x (a 25 s climb in a 15 s phrase). `--start`
   folds the pickup before the first phrase into the opening shot, and takes the first phrase even when a
   flying scene or a hero was planned there (with `--sections` a chorus opened one track: the pickup stayed a 1 s
-  scene of another clip, "an off-topic piece for a couple of seconds at the very start"). An `--end` moment ends
-  2 s before the end, so the fade-out follows it. A track's last phrase can be a tail of a few seconds (3.3 s,
+  scene of another clip, "an off-topic piece for a couple of seconds at the very start"). An `--end` moment
+  (`CLIP:SEC`) lands on the track's last hit, with 2 s of run-up in its shot and the rest of the music after it
+  (2-6 s; else it ends 2 s before the end): a crash into a moose as a piece ended the edit 2 s after the
+  crash, which fell 1.5-2.4 s after the last beat of two tracks, in silence; as a moment it met the last hit
+  within 12 ms on both. The plan puts the moment within 0.15 s of the hit and the last shot is then slid onto it
+  at constant speed (bending onto hits had moved it 0.3-0.5 s). A track's last phrase can be a tail of a few seconds (3.3 s,
   5.4 s, 4.9 s on three tracks of one job): an `--end` piece that would run over 1.25x there takes the scene
   before it too (unless that is a hero) and plays near 1x, as `edl_edit.py --end-from` does after the fact.
 - **Flying scenes** (`--fly N`): one whole phrase around a manoeuvre, people ignored; elsewhere in a people
@@ -367,6 +383,21 @@ for it once the information piled up.
 - Every official DJI D-Log M → Rec.709 LUT (O4, Avata 2, Mini 4 Pro, Air 3/3S, Flip, Pocket 3, Action 4/5,
   Nano, 360) is the same file. Indoors it looked dim and green; `--grade auto` adds per-shot levels (p0.5 → 6,
   p99.5 → 242) and white balance from near-white pixels, constant within a shot, alike across the edit.
+- **Two cameras** (`--match CLIP`, `edl_edit.py --match`): the grade levels each shot, but a RunCam Thumb stayed
+  yellow-orange next to a GoPro of the same afternoon (Lab b 34-39 against 20, a 0..+6 against −6; the owner:
+  "align the colour"). Each other clip's Lab a, b (mean and spread over 24 frames of its usable footage) are
+  moved to the reference clip's, fitted as one affine RGB map per clip, applied after the LUT and before the
+  grade (so the grade's levels come after it). Per clip, not per shot: a shot of grass is not a shot of sky.
+  After it and the grade: b 23-27, a −2..−7. The owner then: "the colour is right, contrast and tone are not":
+  the grade's levels move only the ends, and the Thumb's shadows sat lifted (lightness p5 14-15 against 6, the
+  median 40-43 against 35). A luma curve through 17 quantiles of the two clips matched the histograms (p5 6-8,
+  median 32-37), but its slopes of 0.5-2.5, times the colour map and the grade's gain, made the Thumb's
+  compression blocks stand out ("everything in steps, discrete; the colour alone looked better") and a brown
+  moose near black; with 255 kept white its clipped sky had even got a 9x steep top (pink and cyan blotches).
+  Now the match starts with a gamma between the clip's black and white (where the grade's levels go), fitted to
+  the reference's quantiles 10-90 and taken at half (gamma 1.14-1.26, the slope at most that), each pixel scaled
+  whole (the same curve on R, G, B reddened the moose): p5 10-12, median 36-38. The same frames side by side
+  showed no more blocks than the colour alone. A cheap camera's 8-bit footage takes a gentle curve only.
 
 ## Finals
 
