@@ -44,7 +44,8 @@ again with Marina as a `--must` reshuffled the other scenes (the friend's close-
 had seen was rebuilt (same options, frame for frame) and one scene swapped (`edl_edit.py --replace 2 --clip
 GH010050`). The lift: the detector saw nobody there, "we are ON the lift looking down": the GPS climb found it,
 three pairs of skis under the chair; a scene of each liked edit swapped for it. Finals: together_lift and
-warm_lift in 4K (3840x2160, 30 fps).
+warm_lift in 4K (3840x2160, 30 fps, HEVC): 15 and 12 min from the busy disk, the Gyroflow pieces 5 and 4
+min of it; pieces aligned within 1-4 frames (a smooth chairlift ride correlates 0.67, still 3 frames).
 
 ## Prompt and comments
 
