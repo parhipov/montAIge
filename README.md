@@ -178,6 +178,7 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
 | `music_check.py` | checks a track: constant tempo, phrases |
+| `music_like.py` | catalogue tracks that sound like one the owner liked (CLAP) |
 | `dji_join.py` | joins split DJI recordings |
 
 ## Not implemented yet

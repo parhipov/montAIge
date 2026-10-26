@@ -126,6 +126,7 @@ class Reader:
             self.c.seek(int((first - 2) / self.fps / self.st.time_base), stream=self.st, backward=True)
         self.it = self.c.decode(self.st)
         self.cur, self.img, self.W, self.H, self.crop, self.scale = -1, None, W, H, crop, scale
+        self.prev = (-1, None)                                   # the frame before self.img, for at()
 
     def get(self, i):
         while self.cur < i:
@@ -133,15 +134,31 @@ class Reader:
                 fr = next(self.it)
             except StopIteration:
                 break
-            self.cur = int(round(float(fr.pts * self.st.time_base) * self.fps))
-            if self.cur >= i or self.img is None:
+            n = int(round(float(fr.pts * self.st.time_base) * self.fps))
+            if n >= i - 1 or self.img is None:
                 x0, y0 = self.crop
                 deep = '10' in fr.format.name or fr.format.name.startswith('p01')
                 sw, sh = self.scale or (None, None)
                 img = fr.reformat(width=sw, height=sh, format='rgb48le' if deep else 'rgb24', src_colorspace='itu709',
                                   dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
+                self.prev = (self.cur, self.img)
                 self.img = np.ascontiguousarray(img[y0:y0 + self.H, x0:x0 + self.W])
+            self.cur = n
+        if self.prev[1] is not None and self.prev[0] >= i and self.cur > i:
+            return self.prev[1]
         return self.img
+
+    def at(self, pos, slow):
+        """The picture at a fractional frame number: slower than real time, the two frames around it mixed
+        (edit.py SLOW_BLEND, as in the preview); else the nearest frame."""
+        if not slow:
+            return self.get(int(round(pos)))
+        i = int(np.floor(pos))
+        a = self.get(i)
+        b, w = self.get(i + 1), pos - i
+        if b is a or w < 0.02:
+            return a
+        return (a.astype(np.float32) * (1.0 - w) + b.astype(np.float32) * w + 0.5).astype(a.dtype)
 
 
 def piece_size(W, H, crop_bottom, crop_top, zoom=1.0):
@@ -309,20 +326,27 @@ def main():
         u = np.array(x['anchor_t'])
         v = np.array(x['anchors'])
         sp = (v[-1] - v[0]) / max(u[-1] - u[0], 1e-9)
-        src = np.interp(t - x['t0'], u, v, left=None, right=None)
-        if t - x['t0'] < u[0]:
-            src = v[0] + (t - x['t0'] - u[0]) * sp
-        elif t - x['t0'] > u[-1]:
-            src = v[-1] + (t - x['t0'] - u[-1]) * sp
-        img = readers[(fi, j)].get(max(int(round(src)) - starts[(fi, j)], 0))
+
+        def src_at(tt):
+            if tt < u[0]:
+                return v[0] + (tt - u[0]) * sp
+            if tt > u[-1]:
+                return v[-1] + (tt - u[-1]) * sp
+            return float(np.interp(tt, u, v))
+        src = src_at(t - x['t0'])
+        rd = readers[(fi, j)]                                    # x real time here, for mixing frames
+        slow = (src_at(t - x['t0'] + 0.02) - src_at(t - x['t0'] - 0.02)) / 0.04 < bf.SLOW_BLEND * rd.fps
+        img = rd.at(max(src - starts[(fi, j)], 0.0), slow)
         g = None if a.no_grade else bf.grade_at(x.get('grade'), (src - x['src_frame']) / max(x['src_frames'], 1))
         return grade(img, g)
 
-    day_starts = [k for k in range(len(shots)) if k == 0 or shots[k]['day'] != shots[k - 1]['day']]
+    # a chapter is a day, or a session of one ('2022-08-06 19:23', edit.py --sessions): a caption per day
+    dates = [(x['day'] or '')[:10] for x in shots]
+    day_starts = [k for k in range(len(shots)) if k == 0 or dates[k] != dates[k - 1]]
     caps = {}
     if a.captions:
         for k in day_starts:
-            d = datetime.date.fromisoformat(shots[k]['day'])
+            d = datetime.date.fromisoformat(shots[k]['day'][:10])
             caps[k] = caption_layer(f'{d.day} {MONTHS[d.month - 1]}', W, H)
     nout = int(np.floor(dur * fps))
     k = 0

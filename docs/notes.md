@@ -42,6 +42,15 @@ renders (same frame count as the original), telemetry from the original.
 - **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
   with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
   pieces return 404.
+- **Tracks like a liked one** (`music_like.py`): picked by the catalogue's words, two of three tracks of one job
+  "did not fit at all" (an orchestral "epic, uplifting" one and a "driving" synth one) while a happy steel-drum
+  piece (Paradise Found) fitted. So the next ones come by how they sound: CLAP's music model
+  (`laion/larger_clap_music`) on 10 s windows, averaged per track, over catalogue pieces within 12 % of the liked
+  BPM sharing two of its feel words (86 of 1443). Every track's mean came out 0.97-1.00 like any other's (music
+  against all sounds); centred on the mean of all tracks embedded, the liked one against the rejected orchestral
+  one went from 0.98 to -0.47, and the candidates spread -0.52..0.69. The top had a steel-drum and marimba piece
+  (Moonlight Beach) and an upbeat acoustic one, but also an Irish pub tune first and another steel-drum party
+  piece 55th: the sound is a better guess than the words, not an answer; the owner still chooses by ear.
 
 ## Telemetry and manoeuvres
 
@@ -175,18 +184,28 @@ which owners call beautiful: those come in as editor's pieces.
   44 % to 71 % on the first test; read as "breathing" by some, hence off by default). The hero ramp: beat 0
   rushes in at 1.4x, beats 1-2 at 0.5x with the manoeuvre on beat 2, then base speed; at most 2, where the
   music lifts most, never the same kind twice. `--pace`: loud phrases at 1.1-1.2x, which hides hesitation.
-  50 fps shown at 25 fps is true slow motion; 25 fps sources get frame blending.
+  50 fps shown at 25 fps is true slow motion. Slower than 0.95x of real time a picture is the two source frames
+  around its time mixed (`SLOW_BLEND`, previews and finals alike): 30 fps at 0.5x into 25 fps had shown every
+  other frame twice (qc.py: 19 frozen frames, 1.4 %, all in the two hero ramps; 0 after). At 1x nothing is
+  mixed (30 fps into 50 fps repeats frames rather than ghost every one).
 - **Editor's pieces** (`--must/--start/--end`) are placed before anything else: a hero once took the footage
   next to a piece and the piece silently became another shot. A piece longer than its shots gets the whole
   phrase; longer than the phrase, it plays faster, up to 1.7x (a 25 s climb in a 15 s phrase). `--start`
-  folds the pickup before the first phrase into the opening shot. An `--end` moment ends 2 s before the end,
-  so the fade-out follows it.
+  folds the pickup before the first phrase into the opening shot, and takes the first phrase even when a
+  flying scene or a hero was planned there (with `--sections` a chorus opened one track: the pickup stayed a 1 s
+  scene of another clip, "an off-topic piece for a couple of seconds at the very start"). An `--end` moment ends
+  2 s before the end, so the fade-out follows it. A track's last phrase can be a tail of a few seconds (3.3 s,
+  5.4 s, 4.9 s on three tracks of one job): an `--end` piece that would run over 1.25x there takes the scene
+  before it too (unless that is a hero) and plays near 1x, as `edl_edit.py --end-from` does after the fact.
 - **Flying scenes** (`--fly N`): one whole phrase around a manoeuvre, people ignored; elsewhere in a people
   edit a shot with nobody in it pays `W_EMPTY`.
 - **Chapters** by recording day share the scenes by good flying and, with `--beauty`, beautiful views (a calm
   day over the most beautiful place had 71 good seconds of flying, 285 with the views); `--chapters 3,2,4,2`
   sets them by hand. An editor's moment goes to a scene of its own day: one of 9 Sep placed in a 5 Sep scene
-  left that scene with no footage. ([dagestan](examples/dagestan.md))
+  left that scene with no footage. ([dagestan](examples/dagestan.md)) One day can hold two shoots: three flights
+  over a river by day and one at a house at sunset 1.6 h later; the evening had 77 good seconds against 475 and
+  got 2 scenes of 9, the owner's "house and beauty from above" in them. `--sessions H` makes a day's clips more
+  than H hours apart chapters of their own (labelled by date and time, `--chapters 5,4` sets them).
 - **Landings** (the 10 s before a stretch on the ground) are marked, not cut: every clip of one trip ended in a
   slow approach and a flop that read as a roll ("a dull landing"), but "a landing can be an ending", so a
   window pays `W_LANDING` anywhere but in the last scene.
@@ -305,7 +324,10 @@ which owners call beautiful: those come in as editor's pieces.
   Irganay reservoir. Check names against the GPS before captions or a title. ([dagestan](examples/dagestan.md))
 - **The owner's picks** (`--picked W`): a clip the owner stabilized themselves and kept without its original was
   chosen out of the shoot ("I didn't stabilize them for nothing"); every window of one pays W (2: half the
-  piloting range). At 2 they got 5 to 8 of the 13-19 shots of each edit of one archive.
+  piloting range). At 2 they got 5 to 8 of the 13-19 shots of each edit of one archive. An export of the whole
+  flight beside its original (Gyroflow's trim takes the ends off: 296 of 313 s, 197 of 220, 291 of 303) is a pick
+  too, and montage.py takes the original, gyro and all; an export under 0.8 of its original is a piece of the
+  flight, found by `exports.py`, and does not make the whole flight a pick.
 - **Old exports** (`exports.py`): centre thumbnails at 10 Hz, aspect matched, best correlation over every
   offset; pieces that run on in the same original merge. A 35 s export was found at 72.8-107.8 s (0.84
   against 0.13); a whole-clip export is reported as a copy, not a pick.
@@ -333,6 +355,9 @@ for it once the information piled up.
 - Propellers or a lens guard in view are framing: Gyroflow's zoom, or `--zoom` (1.16 hid a guard's dark arcs
   and blue corners; a frame-edge darkness metric could not tell them from tree shadows).
 - DJI goggle recordings (`DJIG*.mp4`) carry no gyro and are skipped.
+- A clip of a fraction of a second (a GoPro's 0.2 s false start) gets no motion export and a render with no
+  video stream (752 bytes); every later step failed on it. The render step keeps such a render as
+  `<clip>_stabilized.failed` and the scan leaves the clip out.
 
 ## Colour
 
@@ -348,8 +373,8 @@ for it once the information piled up.
 `final.py` renders only the pieces used (Gyroflow trims with margin, `trim_range_only` off), finds each
 piece's start by motion correlation (±1-3 frames from the asked millisecond), applies the LUT and grade on
 the GPU and encodes with NVENC. A 45 s 16:9 4K edit: 9.5 min with x264 on the CPU; a 40 s 4:3 4K D-Log edit:
-33 min, 25 with 10-bit pieces and NVENC; a 58 s 4:3 4K edit with zoom: ~23 min. Slow motion at 50 fps repeats
-frames (no interpolation yet).
+33 min, 25 with 10-bit pieces and NVENC; a 58 s 4:3 4K edit with zoom: ~23 min. Slow motion below 0.95x mixes the
+two neighbouring frames (no interpolation yet).
 
 ## QC
 

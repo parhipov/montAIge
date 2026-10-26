@@ -44,9 +44,11 @@ paths in it); the job's name is its folder (or `name = ...`):
 
 Steps:
   scan      the clips: originals only (not renders, not goggle recordings, not the _parts of a joined
-            recording), and `_stabilized` clips whose original is not there. Split DJI recordings are listed and the job stops: they are joined (dji_join.py)
+            recording), and `_stabilized` clips whose original is not there; not a clip Gyroflow gave no picture of
+            (a fraction of a second: its render is kept as <clip>_stabilized.failed). Split DJI recordings are
+            listed and the job stops: they are joined (dji_join.py)
             only with --join, after the owner of the footage said yes. -> out/<name>/originals.txt
-  render    whole-clip Gyroflow renders 640 px wide, several at once (gf_render.py); GoPro motion through
+  render    whole-clip Gyroflow renders 640 px wide, several at once (gf_render.py); GoPro and .gcsv motion through
             Gyroflow's export (gf_motion.py). A `_stabilized` clip without its original (stabilized before,
             no motion data left) is only scaled down (proxy.py); its motion comes from the picture
             (vis_motion.py in `features`, `hfov = 92` in the job file: the field of view of its picture)
@@ -104,8 +106,14 @@ def has_track(path, fourcc):
     return any(t.formats and t.formats[0] == fourcc for t in tracks)
 
 
+def has_gcsv(path):
+    """A Gyroflow IMU log next to the clip (<stem>.gcsv: RunCam Thumb, other cameras without a motion track in
+    the file): Gyroflow reads it, lens profile included, for the render and the motion export (gf_motion.py)."""
+    return os.path.isfile(os.path.splitext(path)[0] + '.gcsv')
+
+
 # ------------------------------------------------------------------------------------------- scan
-def scan(job, out, join):
+def scan(job, out, join, proxy):
     import dji_join
     roots = [p for p in job['footage'] if os.path.isdir(p)]
     todo = [(o, c) for r in roots for o, c in dji_join.chains_under(r)]
@@ -138,10 +146,12 @@ def scan(job, out, join):
         clips.append(f)
     keep = []
     for c in sorted(set(clips)):
-        if has_track(c, b'djmd') or has_track(c, b'gpmd'):
+        if os.path.exists(failed_render(proxy, c)):
+            print(f'  skip {os.path.basename(c)}: Gyroflow gave no picture of it before ({failed_render(proxy, c)})')
+        elif has_track(c, b'djmd') or has_track(c, b'gpmd') or has_gcsv(c):
             keep.append(c)
         else:
-            print(f'  skip {os.path.basename(c)}: no motion data (DJI djmd / GoPro gpmd)')
+            print(f'  skip {os.path.basename(c)}: no motion data (DJI djmd / GoPro gpmd / a .gcsv next to it)')
     for c in sorted(set(elsewhere)):
         print(f'  {os.path.basename(c)}: stabilized before, without its original: motion from the picture')
     keep += sorted(set(elsewhere))
@@ -159,6 +169,20 @@ def stabilized_before(path):
 def originals(out):
     with open(os.path.join(out, 'originals.txt'), encoding='utf-8') as fh:
         return [x.strip() for x in fh if x.strip()]
+
+
+def failed_render(proxy, clip):
+    """Where a render Gyroflow made no picture in is kept (a clip of a fraction of a second: a header, no video
+    stream), so that the scan leaves its clip out instead of every later step failing on it."""
+    return os.path.join(proxy, os.path.splitext(os.path.basename(clip))[0] + '_stabilized.failed')
+
+
+def has_picture(path):
+    try:
+        with av.open(path) as c:
+            return bool(c.streams.video) and next(c.decode(video=0), None) is not None
+    except (av.error.FFmpegError, OSError):
+        return False
 
 
 # ------------------------------------------------------------------------------------------- render
@@ -202,6 +226,14 @@ def render(job, out, proxy, cache):
         for p in procs:
             p.wait()
         print(f'{tool}: done in {time.time() - t0:.0f}s')
+    made = {c: os.path.join(proxy, os.path.splitext(os.path.basename(c))[0] + '_stabilized.mp4') for c in clips}
+    bad = [c for c, r in made.items() if os.path.exists(r) and not has_picture(r)]
+    for c in bad:
+        os.replace(made[c], failed_render(proxy, c))
+        print(f'  {os.path.basename(c)}: no picture in its render (see the render logs in {out}): left out')
+    if bad:
+        with open(os.path.join(out, 'originals.txt'), 'w', encoding='utf-8') as fh:
+            fh.write('\n'.join(c for c in clips if c not in bad) + '\n')
 
 
 # ------------------------------------------------------------------------------------------- features
@@ -470,7 +502,7 @@ def main():
     t0 = time.time()
     check_edits(job)
     if 'scan' in steps:
-        scan(job, out, a.join)
+        scan(job, out, a.join, proxy)
     if 'render' in steps:
         render(job, out, proxy, cache)
     if 'features' in steps:

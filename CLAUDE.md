@@ -51,7 +51,9 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - Propellers or a lens guard in view after stabilization are framing: Gyroflow's zoom, or `--zoom`. Horizon
   tilt is not a fault.
 - Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo only (`music_check.py`), the
-  catalogue BPM as `bpm`. Kevin MacLeod, CC BY 4.0: credit when publishing.
+  catalogue BPM as `bpm`. Once the owner has liked a track, the next ones by how they sound
+  (`music_like.py LIKED --not DISLIKED`), not by the catalogue's words. Kevin MacLeod, CC BY 4.0: credit when
+  publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
@@ -124,15 +126,18 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
 - Scene cuts that match: `--joins W` (e.g. 2: the camera turning on the same way, looking as high, as bright and
   of the same colour across a scene cut; edit.py prints how many match either way).
-- The owner's picks: `--picked W` (clips the owner stabilized themselves, `_stabilized` without the original).
+- The owner's picks: `--picked W` (clips the owner stabilized themselves: a `_stabilized` export without its
+  original, or an export of the whole flight beside it; a shorter export is a piece, found by `exports.py`).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
   words, `beauty.py`; `plain = [...]` what fills the footage without being a view, e.g. snow up close): a
   beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
-- Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty). Landings
-  are marked and kept for the last scene.
+- Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty);
+  `--sessions H`: a day's clips more than H hours apart are chapters of their own (the flights by day and the
+  evening's), counted by `--chapters`. Landings are marked and kept for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`); a piece longer than its phrase plays
-  faster, up to 1.7x.
+  faster, up to 1.7x. The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
+  phrase takes the scene before it too (not a hero).
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z` (kept in the EDL for `final.py`).
 - `--plan-only`, `--debug`, `--height`, `--fps`.
 
@@ -151,6 +156,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `camera.py CLIP|--list FILE`: flown or carried, from a GoPro's accelerometer.
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.
+- `music_like.py LIKED.mp3 [--not DISLIKED.mp3]`: catalogue tracks that sound like the liked one (CLAP's music
+  model), downloaded into `models/music/catalogue/`; then `music_check.py`.
 - `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg [--cuts]`, `final.py`, `dji_join.py`,
   `djimeta.py`.
 - `edl_edit.py`: a comment on one scene of a finished edit: `--replace K` (the same music, the rest frame for

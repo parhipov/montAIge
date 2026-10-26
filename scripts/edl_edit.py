@@ -234,8 +234,15 @@ def main():
     ap.add_argument('--seed', type=int, default=None, help='--replace: another candidate')
     ap.add_argument('--cache', default=os.path.join(paths.ROOT, 'out', 'diagnostics', '.telemetry_cache'))
     ap.add_argument('-o', '--out', required=True, help='the preview; _edl.json next to it')
-    ap.add_argument('--height', type=int, default=480)
+    ap.add_argument('--height', type=int, default=None,
+                    help='preview height; default that of the edit\'s own preview beside the EDL (else 480)')
     a, extra = ap.parse_known_args()
+    if a.height is None:                                         # as montage.py made it (640 px wide)
+        own = a.edl[:-len('_edl.json')] + '.mp4' if a.edl.endswith('_edl.json') else ''
+        a.height = 480
+        if os.path.exists(own):
+            with av.open(own) as c:
+                a.height = c.streams.video[0].codec_context.height
     extra = [x for x in extra if x != '--']
     with open(a.edl, encoding='utf-8') as fh:
         e = json.load(fh)

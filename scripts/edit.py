@@ -200,10 +200,12 @@ THEME_MIN_S = 2.0       # a shot this short does not use up a theme's scenes (a 
 # W_BEAUTY x its view everywhere; in a people edit a beautiful view excuses a shot with nobody in it (W_EMPTY x
 # (1 - view)); the cinematic piloting score (quiet music) takes CINE_VIEW of the view
 W_BEAUTY, CINE_VIEW = 0.0, 0.3
-# the owner's picks (--picked W): a clip the owner stabilized before (a `_stabilized` export without its original)
-# was chosen out of the shoot ("I didn't stabilize them for nothing"); every window of one pays W_PICKED
+# the owner's picks (--picked W): a clip the owner stabilized themselves (a `_stabilized` export, alone or beside its
+# original) was chosen out of the shoot ("I didn't stabilize them for nothing"); every window of one pays W_PICKED
 W_PICKED = 0.0
-CHAPTERS = []           # --chapters N,N,...: scenes per recording day in date order, instead of chapters() sharing them
+PICK_WHOLE = 0.8        # an export beside its original this long or longer is the whole flight (ends trimmed)
+CHAPTERS = []           # --chapters N,N,...: scenes per recording day (or --sessions) in date order, instead of
+                        # chapters() sharing them
 THEMES = []             # [(text, scenes allowed)]
 # scene: cuts inside it jump 1..12 s forward; continuity of rotation across them
 GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.0
@@ -213,9 +215,12 @@ GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.
 W_JOIN, JOIN_ELEV, JOIN_BRIGHT, JOIN_AB, JOIN_GOOD = 0.0, 15.0, 25.0, 8.0, 0.6
 # speed ramps (relative to the shot's base speed) and the hero ramp
 RAMP_LO, RAMP_HI, ABS_LO, ABS_HI, W_SNAP, W_DEV = 0.7, 1.4, 0.5, 1.7, 1.0, 6.0
+# slower than this (x real time), a picture is the two source frames around its time mixed: 30 fps at 0.5x into
+# 25 fps showed every other frame twice (qc.py: 1.4 % frozen, all in the two hero ramps); at 1x nothing is mixed
+SLOW_BLEND = 0.95
 PIECE_MAX_SPEED, PIECE_MIN_SPEED = ABS_HI, 0.8
+END_MERGE_SPEED = 1.25  # an --end piece faster than this in the last scene takes the scene before it too
 PICKUP_MIN_S = 1.5      # a pickup before the first phrase shorter than this joins the first shot (a 0.7 s flash)
-PICKUP_MIN_S = 1.5       # a pickup before the first phrase shorter than this joins the first shot (a 0.7 s flash)
 HERO_RUSH, HERO_SLOW, HERO_AT = 1.4, 0.5, 2.0      # beat 0 fast, beats 1-2 slow, manoeuvre on beat 2
 BASE_SPEED = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}
 BASE_SPEED_PACE = {1: 1.1, 2: 1.15, 3: 1.2}         # --pace: faster flying, hesitation hidden (nov2023)
@@ -565,6 +570,7 @@ def prank(x, ref):
 class Flight:
     def __init__(self, idx, src, stab, q, fps, flow, proxy, look=None, motion='gyro'):
         self.idx, self.src, self.stab, self.fps, self.proxy, self.look = idx, src, stab, fps, proxy, look
+        self.picked = owner_picked(src)
         self.motion = motion                                     # 'gyro', or 'picture' (vis_motion.py)
         self.name = os.path.splitext(os.path.basename(src))[0]
         self.n = n = len(q)
@@ -750,6 +756,23 @@ def creation_time(path):
 def stabilized_before(path):
     """A clip montage.py's scan took in as already stabilized: a `_stabilized` export without its original."""
     return '_stabilized' in os.path.basename(path).lower()
+
+
+def owner_picked(path):
+    """A clip the owner stabilized themselves: a `_stabilized` export without its original, or an original with
+    the owner's `_stabilized` export of the whole flight beside it (PICK_WHOLE of its length or more: Gyroflow's
+    trim takes the ends off; montage.py takes the original then, gyro and all). A shorter export is a piece of
+    the flight, not all of it: exports.py finds where it is, and it comes in as a --must."""
+    if stabilized_before(path):
+        return True
+    d, n = os.path.split(path)
+    want = os.path.splitext(n)[0].lower() + '_stabilized'
+    exp = [m for m in (os.listdir(d or '.') if os.path.isdir(d or '.') else [])
+           if os.path.splitext(m)[0].lower() == want]
+    if not exp:
+        return False
+    with av.open(path) as a, av.open(os.path.join(d, exp[0])) as b:
+        return b.duration >= PICK_WHOLE * a.duration
 
 
 def load_motion(src, cache_dir, render=None):
@@ -1368,7 +1391,7 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
         sc += W_HIT * cov / hw[1:].sum()
     vw = (f.cvw[s + n] - f.cvw[s]) / n if W_BEAUTY and hasattr(f, 'cvw') else np.zeros(s.size)
     sc += W_BEAUTY * vw
-    if W_PICKED and stabilized_before(f.src):
+    if W_PICKED and f.picked:
         sc += W_PICKED
     if fly:
         sc += W_FLY * qs
@@ -1604,6 +1627,16 @@ def place_moments(scenes, flights, musts, pools, used, rng):
     PIECE_MAX_SPEED) when even the phrase is shorter than the piece."""
     for fi, lo, hi, end_at, first in sorted(musts, key=lambda x: (x[3] is None, not x[4])):
         f, last = flights[fi], end_at is not None
+        if last and len(scenes) > 2:
+            # a track's last phrase can be a tail of a few seconds: the sunset climb (5.5 s) ran at 1.7x in a 3.3 s
+            # one. Then the ending takes the scene before it too, as edl_edit.py --end-from does, and plays near 1x
+            prev = scenes[-2]
+            fit = (hi - lo + PIECE_AIR_S * f.fps) / max(source_frames(merged(scenes[-1]['shots']), f), 1)
+            if fit > END_MERGE_SPEED and not (prev['hero'] or prev.get('must') or prev['kind'] == 'pickup'):
+                tail = scenes[-1]['shots'][-1]['t1'] - scenes[-1]['shots'][0]['t0']
+                scenes[-2:] = [dict(scenes[-1], shots=prev['shots'] + scenes[-1]['shots'])]
+                scenes[-1]['idx'] = len(scenes) - 1
+                print(f'  the last phrase is {tail:.1f}s (the ending at {fit:.2f}x): the ending takes the one before')
         free = [len(scenes) - 1] if last else [i for i, sc in enumerate(scenes)     # a flying scene may host a flight
                                                if not (sc['hero'] or sc.get('must'))]
         # chapters by day: a moment goes to a scene of its own day (assign looks for footage of the scene's day
@@ -2089,21 +2122,31 @@ def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=No
         j0 = int(np.ceil(x['t0'] * fps_out - 1e-9))
         j1 = nout if si == len(shots) - 1 else int(np.ceil(x['t1'] * fps_out - 1e-9))
         tm = time_map(x)
-        want = np.clip(np.round(tm(np.arange(j0, j1) / fps_out - x['t0'])).astype(int), 0, f.n - 1)
+        pos = np.clip(tm(np.arange(j0, j1) / fps_out - x['t0']), 0, f.n - 1)
+        want = np.round(pos).astype(int)
         spd = tm.derivative()(np.arange(j0, j1) / fps_out - x['t0']) / f.fps
-        c.seek(int(want[0] / f.fps / st.time_base), stream=st, backward=True)
+        c.seek(int(np.floor(pos[0]) / f.fps / st.time_base), stream=st, backward=True)
         it = c.decode(st)
-        cur, img = -1, None
-        for jj, w, v in zip(range(j0, j1), want, spd):
-            while cur < w:
-                fr = next(it)
+        cur, got = -1, {}                                        # decoded frames still wanted, by number
+        for jj, p, w, v in zip(range(j0, j1), pos, want, spd):
+            lo = int(np.floor(p)) if v < SLOW_BLEND else int(w)
+            hi = min(lo + 1, f.n - 1) if v < SLOW_BLEND else lo
+            while cur < hi:
+                try:
+                    fr = next(it)
+                except StopIteration:
+                    break
                 cur = int(round(float(fr.pts * st.time_base) * f.fps))
-                if cur >= w:
-                    img = fr.reformat(**to_rgb).to_ndarray()[zy:zy + H, zx:zx + W]
-                    if lut is not None:
-                        img = lut(img)
-                    if x.get('grade'):
-                        img = apply_grade(img, grade_at(x['grade'], (w - x['src_frame']) / max(x['src_frames'], 1)))
+                if cur >= lo or not got:
+                    got[cur] = fr.reformat(**to_rgb).to_ndarray()[zy:zy + H, zx:zx + W]
+            got = {i: im for i, im in got.items() if i >= lo or i == max(got)}
+            a_ = got[min((i for i in got if i >= lo), default=max(got))]
+            b_ = got[min((i for i in got if i >= hi), default=max(got))]
+            img = a_ if b_ is a_ else cv2.addWeighted(a_, 1.0 - (p - lo), b_, p - lo, 0.0)
+            if lut is not None:
+                img = lut(img)
+            if x.get('grade'):
+                img = apply_grade(img, grade_at(x['grade'], (p - x['src_frame']) / max(x['src_frames'], 1)))
             t = jj / fps_out
             g = min(1.0, t / FADE_IN_S, (dur - t) / FADE_OUT_S)
             o = img if g >= 1.0 else (img * max(g, 0.0)).astype(np.uint8)
@@ -2198,11 +2241,14 @@ def make_parser():
                     help='weight of beautiful views (beauty.py, in the words of the job); 4 = as much as piloting. A '
                          'beautiful view also excuses a shot with nobody in it in a people edit')
     ap.add_argument('--chapters', default=None,
-                    help='scenes per recording day in date order, e.g. 3,2,4,2 (0 leaves a day out); default: in '
-                         'proportion to good flying (and beautiful views with --beauty)')
+                    help='scenes per recording day (or session, --sessions) in date order, e.g. 3,2,4,2 (0 leaves a '
+                         'day out); default: in proportion to good flying (and beautiful views with --beauty)')
+    ap.add_argument('--sessions', type=float, default=0.0,
+                    help='clips of one day more than this many hours apart are chapters of their own (the flights '
+                         'of the day and of the evening), e.g. 1; default off: a chapter per day')
     ap.add_argument('--picked', type=float, default=0.0,
-                    help='weight of the clips the owner stabilized before (a `_stabilized` export without its '
-                         'original): the owner\'s own picks; 2 = half the piloting range')
+                    help='weight of the clips the owner stabilized themselves (a `_stabilized` export, with or '
+                         'without its original beside it): the owner\'s own picks; 2 = half the piloting range')
     ap.add_argument('--theme', action='append', default=[],
                     help='"TEXT[:N]", what the edit shows in words (repeatable): at most N scenes of it (default 1), '
                          'e.g. "a man on a ladder repairing a roof" when one activity fills the footage')
@@ -2268,6 +2314,19 @@ def apply_options(a):
     return np.random.default_rng(a.seed) if a.seed is not None else None
 
 
+def set_sessions(flights, hours):
+    """--sessions H: clips of one day more than H hours apart (the end of one to the start of the next) are
+    chapters of their own, e.g. the day's flights by a river and the evening's at the house (the evening had a
+    fifth of the good seconds, so sharing the day by them gave it 2 scenes of 9). The chapter is the date and the
+    time of its first clip, '2022-08-06 19:23'; --chapters counts these."""
+    prev, label = None, None
+    for f in sorted((f for f in flights if getattr(f, 'when', None)), key=lambda f: f.when):
+        if prev is None or f.when.date() != prev.when.date() or \
+                (f.when - prev.when).total_seconds() - prev.n / prev.fps > hours * 3600:
+            label = f.when.strftime('%Y-%m-%d %H:%M')
+        f.day, prev = label, f
+
+
 def prepare_flights(flights, a):
     """What the options ask of the footage beyond find_flights: climbs, beautiful views, themes."""
     if 'ascent' in a.want or a.arcs:
@@ -2278,6 +2337,8 @@ def prepare_flights(flights, a):
         set_beauty(flights)
     if THEMES:
         load_themes(flights, a.clip_cache)
+    if a.sessions:
+        set_sessions(flights, a.sessions)
     st = np.concatenate([f.peak_strength for f in flights])
     HIT_FULL[0] = float(np.median(st)) if st.size else 1.0
 
@@ -2374,6 +2435,12 @@ def main():
         musts.append((f.idx, lo, hi, end_at, first))
     if a.arcs:
         musts += pick_arcs(flights, m, a.arcs, musts)
+    if any(x[4] for x in musts):
+        # the editor's opening piece takes the first phrase: a flying scene or a hero planned there gives way (with
+        # --sections a track's chorus can open it: the first phrase was a flying scene, the pickup stayed a 1 s
+        # scene of another clip and the piece came second, "an off-topic piece for a couple of seconds")
+        first = scenes[1] if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else scenes[0]
+        first['hero'] = first['slow_hero'] = first['fly'] = False
     short_pickup = scenes[0]['kind'] == 'pickup' and sum(
         x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] < PICKUP_MIN_S
     if (any(x[4] for x in musts) or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
