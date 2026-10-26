@@ -26,6 +26,19 @@ renders (same frame count as the original), telemetry from the original.
   exact. Similarity alone kept 39 s of quiet intro and skipped the big part, so the path cost also rewards
   the mean energy of the kept phrases and keeping a drop. Lengths come in phrase steps (10 s at 96 BPM):
   `--target` gets the nearest path with good joins.
+- **Sections** (`music_edit.sections`, printed by edit.py for every edit): phrases of the whole track joined by
+  average linkage on the same bar spectra, the similarity rescaled per track (median pair 0, a copy 1): the
+  median pair sat at 0.46 (Shiny Tech) to 0.94 (Morgana Rides), repeats at 0.93-0.99, so a fixed threshold
+  joined all of one track and none of another. At 0.5 a block of four phrases came back three times in
+  Motivator, and Nonstop's chorus was its phrases 8-11 and 22-23, where the track takes off. The chorus is the
+  label that comes back with the highest mean energy; a shortened track takes the labels of the whole one (a
+  chorus is the song's, not the cut's). `--sections` puts the heroes and flying scenes on it, the first chorus
+  first, and with `--lively` the 4-beat shots only there: on Nonstop the hero moved from the biggest lift
+  (phrase 4) to the chorus (phrase 8), and the other phrases kept 8-beat shots. A homogeneous track (Morgana
+  Rides) gets many labels and a weak chorus.
+- **Drums for the hits: no.** Hits from the percussive part (median-filter separation) were the hits of the
+  mix: 63 of 69 (Montauk Point), 55 of 57 (Nonstop), 80 of 88 (Motivator), 21 of 25 (Heroic Age). A hit is
+  already a top-10 % onset peak on a beat, and those are drums.
 - **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
   with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
   pieces return 404.
@@ -325,7 +338,7 @@ cut, and two hits before that cut falling on level flight.
   smoothing that rotation and turning each frame back would stabilize it. Checkable on the gyro clips.
 - An absolute horizon for motion from the picture (sky and ground, or a regression of the camera angle on the
   CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.
-- Tracks without a constant tempo: a neural beat tracker (Beat This!), drum stems for cleaner accents.
+- Tracks without a constant tempo: a neural beat tracker (Beat This!).
 - Cuts on half beats, for musical hits between beats (two thirds of the hits of one track).
 - Scenes in the order of recording within a day (day, evening, sunset): a sunset placed between daytime scenes
   had to be swapped out by hand.
@@ -337,8 +350,6 @@ cut, and two hits before that cut falling on level flight.
   scene after it.
 - Per-shot Gyroflow settings: horizon lock off for flips.
 - An EDL / OTIO export for finishing by hand.
-- GoPro HiLight tags: a button pressed while recording is kept in the file, the owner's own pick (what Quik
-  builds on): weigh like `--picked`, or offer as `--must`. No footage with tags to try it on yet.
 - The footage's own sound, in words (CLAP, the audio twin of CLIP): laughter, a splash, shouting as `find:`
   and themes (Insta360 and GoPro listen to it). Carried cameras only: a drone hears its propellers. No footage
   to try it on yet.

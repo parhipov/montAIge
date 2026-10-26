@@ -115,6 +115,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Flying: `--fly N` (flying scenes around a manoeuvre on the biggest lifts), `--ramps`, `--heroes N` (the
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
   in loud phrases), `--want KIND` (e.g. `ascent`), `--arcs N` (whole climbs and descents).
+- Music structure: edit.py prints the track's sections per phrase and its chorus (the section that comes back
+  loudest); `--sections` puts the heroes and flying scenes on the chorus, the first one first, and with
+  `--lively` the 4-beat shots only there.
 - Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
 - The owner's picks: `--picked W` (clips the owner stabilized themselves, `_stabilized` without the original).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in

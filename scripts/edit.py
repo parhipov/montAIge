@@ -151,6 +151,9 @@ W_AWAY, W_IMPOSTOR, IMPOSTOR_AREA, PEER_TAGS = 2.0, 8.0, 0.01, []
 ANIMAL_WORTH = 1.0      # a cat or a dog (objects.py) against a person of the same size
 # flying scenes (--fly N): on the biggest music lifts people do not count, piloting counts W_FLY extra
 MAX_FLY, W_FLY = 0, 3.0
+# --sections: heroes and flying scenes go to the chorus (music_edit.sections), the first chorus first; with
+# --lively, the 4-beat shots too (phrases outside the chorus keep CALM_PATTERNS)
+SECTIONS, CALM_PATTERNS = [False], {}
 # editor's moments: a window that shows the moment (from 0.5 s before to 1 s after) gets W_MUST
 W_MUST, MUST_OPEN_S, END_OPEN_S, END_SET = 50.0, 3.0, 8.0, [False]
 # an editor's piece longer than a whole phrase plays faster, up to ABS_HI (the ramps' ceiling): a 25 s climb
@@ -1031,14 +1034,16 @@ def plan_scenes(m, rng):
     if start > 0:                                                # pickup before the first phrase
         c0 = 0 if loud[:start].mean() < quiet_db else 1
         scenes.append(dict(kind='pickup', cls=c0, shots=[shot(0, start, c0)]))
+    sec = m.get('sections', {})
     for i, (a, c) in enumerate(zip(phrases, cls)):
-        opts = PATTERNS[c]
+        label = sec.get(a)
+        opts = CALM_PATTERNS[c] if CALM_PATTERNS and label != m.get('chorus') else PATTERNS[c]
         pat = opts[rng.integers(len(opts))] if rng is not None else opts[i % len(opts)]
         sh = []
         for L in pat:
             sh.append(shot(a, L, c))
             a += L
-        scenes.append(dict(kind='phrase', cls=int(c), shots=sh))
+        scenes.append(dict(kind='phrase', cls=int(c), shots=sh, section=label))
     if tail > 0:
         sh, a = [], nb - tail
         while a < nb:
@@ -1060,6 +1065,10 @@ def plan_scenes(m, rng):
             lift = s['cls'] - prev + (2 if prev == 0 else 0)
             if lift > 0:
                 lifts.append((lift, s['cls'], -i))
+    if SECTIONS[0] and m.get('chorus'):                          # the chorus instead, the first one first
+        lifts = [(len(scenes) - i, s['cls'], -i) for i, s in enumerate(scenes)
+                 if s.get('section') == m['chorus'] and s['kind'] == 'phrase' and s['cls'] >= 2
+                 and s['shots'][0]['nbeats'] >= 4 and i > 0] or lifts
     for _, _, ni in sorted(lifts, reverse=True)[:MAX_HEROES]:
         scenes[-ni]['hero'] = True
     # flying scenes: the biggest lifts, else the loudest phrases; not the opening, not side by side
@@ -2063,6 +2072,9 @@ def make_parser():
                          'them, not a figure far away in a crowd); default any size')
     ap.add_argument('--lively', action='store_true', help='4-beat shots in loud phrases (PATTERNS_LIVELY)')
     ap.add_argument('--long', action='store_true', help='a shot per 16-beat phrase: whole flights (PATTERNS_LONG)')
+    ap.add_argument('--sections', action='store_true',
+                    help='heroes and flying scenes on the chorus (the section of the track that comes back loudest), '
+                         'the first chorus first; with --lively, 4-beat shots only there')
     ap.add_argument('--no-hits', action='store_true',
                     help='no cuts moved or added onto the musical hits, no W_HIT for motion onsets meeting them')
     ap.add_argument('--heroes', type=int, default=0,
@@ -2104,10 +2116,14 @@ def make_parser():
 def apply_options(a):
     """The weights and switches of the command line, set where the scoring reads them; -> the noise generator."""
     global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED
+    SECTIONS[0] = a.sections
     if a.lively:
+        if a.sections:
+            CALM_PATTERNS.update(PATTERNS)
         PATTERNS.update(PATTERNS_LIVELY)
     if a.long:
         PATTERNS.update(PATTERNS_LONG)
+        CALM_PATTERNS.clear()
         TAIL_BEATS[0] = 16
         HIT_MIN[0] = HIT_MIN_LONG
     HIT_ON[0] = not a.no_hits
@@ -2179,9 +2195,11 @@ def main():
     print('music:')
     music_path, edit_info = a.music, None
     m = analyse_music(a.music, a.bpm)
+    import music_edit
+    phrases, cls, _, _, be = phrase_layout(m)                    # sections of the whole track: the song's own
+    F_whole = music_edit.phrase_features(a.music, m['beats'], m['period'], phrases)
+    sec_whole, chorus = music_edit.sections(F_whole, [be[p:p + 16].mean() for p in phrases])
     if a.target:
-        import music_edit
-        phrases, cls, _, _, _ = phrase_layout(m)
         music_path = base + '_music.wav'
         edit_info = music_edit.shorten(a.music, music_path, m, [(p, 16, c == 0, int(c)) for p, c in zip(phrases, cls)],
                                        a.target)
@@ -2190,6 +2208,13 @@ def main():
         m = analyse_music(music_path, a.bpm)
     print(f'  {os.path.basename(music_path)}: {m["duration"]:.1f}s, {m["bpm"]:.2f} BPM, {m["beats"].size} beats, '
           f'downbeat phase {m["downbeat"]}')
+    phrases, cls = phrase_layout(m)[:2]
+    sec = sec_whole if music_path == a.music else music_edit.like(
+        music_edit.phrase_features(music_path, m['beats'], m['period'], phrases), F_whole, sec_whole)
+    m['sections'], m['chorus'] = dict(zip(phrases, sec)), chorus
+    print(f'  sections (and energy) per phrase: {" ".join(f"{s}{c}" for s, c in zip(sec, cls))}; chorus '
+          + (f'{chorus}' + ('' if chorus in sec else ' (not in the cut)') if chorus else 'none')
+          + ('' if music_path == a.music else f'; whole track {"".join(sec_whole)}'))
     scenes = plan_scenes(m, rng)
     scenes[-1]['last'] = True
     if all(hasattr(f, 'day') for f in flights):
@@ -2294,11 +2319,12 @@ def main():
         grade_all(scenes, flights, lut)
     edl = dict(music=os.path.abspath(music_path), music_edit=edit_info, bpm=m['bpm'], seed=a.seed,
                subject=a.subject or None, focus=bool(FOCUS[0]), zoom=a.zoom,
-               lut=a.lut, flights=[dict(idx=f.idx, original=f.src, render=f.stab, render_offset=f.offset,
+               lut=a.lut, sections=' '.join(sec), chorus=chorus,
+               flights=[dict(idx=f.idx, original=f.src, render=f.stab, render_offset=f.offset,
                                         proxy=f.proxy, fps=f.fps, day=getattr(f, 'day', None),
                                         recorded=getattr(f, 'when', None) and f.when.isoformat()) for f in flights],
                scenes=[dict(idx=s['idx'], kind=s['kind'], cls=s['cls'], hero=s['hero'], slow_hero=s['slow_hero'], fly=s['fly'],
-                            must=bool(s.get('must')),
+                            must=bool(s.get('must')), section=s.get('section'),
                             flight=s['flight'], day=s.get('day'),
                             shots=[{k: v for k, v in x.items() if k not in ('beat_w', 'bpm', 'hit')}
                                    | dict(src_t0=x['src_frame'] / flights[x['flight']].fps) for x in s['shots']])

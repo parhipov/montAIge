@@ -20,7 +20,11 @@ from scipy.signal import stft
 import music as mus
 
 
-def phrase_similarity(path, beats, period, starts):
+SECTION_SIM = 0.5      # two phrases are one section above this, on similarity rescaled from the track's median pair
+
+
+def phrase_features(path, beats, period, starts):
+    """Per phrase, its 4 bars as log spectra (48 bands, 40 Hz-10 kHz), mean-centred, unit length."""
     y = mus.load_audio(path)
     f, t, Z = stft(y, fs=mus.SR, nperseg=4096, noverlap=4096 - 1024)
     S = np.abs(Z) ** 2
@@ -31,8 +35,39 @@ def phrase_similarity(path, beats, period, starts):
         v = L[:, (t >= beats[b0]) & (t < beats[b0] + 4 * period)].mean(1)
         v = v - v.mean()
         return v / (np.linalg.norm(v) + 1e-12)
-    F = np.array([[bar(p + 4 * k) for k in range(4)] for p in starts])
+    return np.array([[bar(p + 4 * k) for k in range(4)] for p in starts])
+
+
+def phrase_similarity(path, beats, period, starts):
+    F = phrase_features(path, beats, period, starts)
     return np.einsum('ikd,jkd->ij', F, F) / 4
+
+
+def sections(F, energy):
+    """A section label per phrase (A, B, ... in order of appearance) and the chorus: the label that comes back
+    with the highest mean energy (None if nothing comes back). Phrases are joined by average linkage on their
+    similarity rescaled per track, the median pair to 0 and a copy to 1: the median sat at 0.46 (Shiny Tech) to
+    0.94 (Morgana Rides), repeats at 0.93-0.99."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+    n = len(F)
+    if n < 2:
+        return ['A'] * n, None
+    S = np.einsum('ikd,jkd->ij', F, F) / 4
+    med = np.median(S[~np.eye(n, dtype=bool)])
+    D = np.clip(1 - (S - med) / max(1 - med, 1e-6), 0, None)
+    np.fill_diagonal(D, 0)
+    names, labels = {}, []
+    for c in fcluster(linkage(squareform(D, checks=False), 'average'), 1 - SECTION_SIM, 'distance'):
+        labels.append(names.setdefault(c, chr(65 + len(names) % 26)))
+    again = {l for l in labels if labels.count(l) > 1}
+    chorus = max(again, key=lambda l: np.mean([e for e, x in zip(energy, labels) if x == l]), default=None)
+    return labels, chorus
+
+
+def like(F, F_ref, labels_ref):
+    """The label of the most similar reference phrase, per phrase (a shortened track against the whole one)."""
+    return [labels_ref[int(np.argmax(np.einsum('kd,jkd->j', f, F_ref)))] for f in F]
 
 
 def best_path(sim, dur, quiet, fixed_pre, fixed_post, target, max_jumps=3, cls=None):
