@@ -2,10 +2,18 @@
 
 # montAIge
 
+**Filmed everything. Watched nothing. Fixed.**
+
 > *"I liked it, and people with worse taste are absolutely delighted."*
 > — Zinovy Gerdt
 
-Edits drone and action-camera footage to music. Claude (in Claude Code) makes the editing decisions. To be
+Everyone films: the drone, the GoPro on the helmet, the phone. Nobody watches: hours of footage go to a drive
+and stay there, because going through them takes longer than the trip did. Here you point it at the folder, say
+in a sentence what it was and who is in it, and get back a minute cut to music: the best moments, cuts where
+the music asks for them, nothing you would skip. Fair warning: it can easily take all night, because even maths
+needs time to do maths. Then anything can be fixed: just say in plain words what is wrong.
+
+Edits any footage to music. Claude (in Claude Code) makes the editing decisions. To be
 honest, ChatGPT would cope too, but Claude wrote all this, so there you have it, ladies and gentlemen. Scripts
 on your GPU analyse the footage and give the model numbers and short text summaries instead of frames.
 
