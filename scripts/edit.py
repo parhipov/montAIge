@@ -67,6 +67,13 @@ CINE_PARTS = dict(parallax=0.55, lean=0.30, smooth=0.15)          # cinematic: q
 # skiing, cycling, walking): nobody pilots it, so its pitch is where the head looks, not speed or a dive. No lean
 # in the piloting scores, no dive / pull-up / descent manoeuvres, and a stop is not a landing
 CARRIED = [False]
+# ... and a head looking down at the snow under its skis (camera GROUND_DEG below the horizon and lower: nothing in the
+# picture but snow and a shadow) is an empty shot: W_GROUND x its share, on a ramp between the two angles. On a
+# helmet GoPro the shots of snow alone were -40..-45 deg, the views -8..+8, a skier up close -29 (Arkhyz)
+GROUND_DEG, W_GROUND = (30.0, 40.0), 6.0
+# ... and a clip loses CARRIED_TRIM_S at its ends (the button pressed), not the 3 s and 5 s of a take-off and a
+# landing: a 13 s clip of us turning round in a lift queue had 5 s left, too short to open an edit
+CARRIED_TRIM_S = (1.0, 1.0)
 # GPS ground speed (gps.py track; --speed W): W of the action score against the parts above, half of that in the
 # cinematic one, ranked across all footage; a frame without a fix ranks in the middle. Speed is what the action of a
 # carried camera is (a fast run down a slope), and fast flying of a drone that carries a GoPro
@@ -178,7 +185,7 @@ THEMES = []             # [(text, scenes allowed)]
 GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.0
 # speed ramps (relative to the shot's base speed) and the hero ramp
 RAMP_LO, RAMP_HI, ABS_LO, ABS_HI, W_SNAP, W_DEV = 0.7, 1.4, 0.5, 1.7, 1.0, 6.0
-PIECE_MAX_SPEED = ABS_HI
+PIECE_MAX_SPEED, PIECE_MIN_SPEED = ABS_HI, 0.8
 HERO_RUSH, HERO_SLOW, HERO_AT = 1.4, 0.5, 2.0      # beat 0 fast, beats 1-2 slow, manoeuvre on beat 2
 BASE_SPEED = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}
 BASE_SPEED_PACE = {1: 1.1, 2: 1.15, 3: 1.2}         # --pace: faster flying, hesitation hidden (nov2023)
@@ -572,8 +579,9 @@ class Flight:
     def _usable(self):
         fps, n = self.fps, self.n
         u = np.ones(n, bool)
-        u[:int(3 * fps)] = False
-        u[n - int(5 * fps):] = False
+        head, tail = CARRIED_TRIM_S if CARRIED[0] else (3.0, 5.0)  # a take-off and a landing, or a button pressed
+        u[:int(head * fps)] = False
+        u[n - int(tail * fps):] = False
         raw = np.linalg.norm(self.rates, axis=1)
         for c in np.flatnonzero(raw > 2000):                     # crash / impact
             if c > n - 15 * fps:
@@ -1297,6 +1305,10 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
         cl = f.cland if hasattr(f, 'cland') else csum(f.landing.astype(np.float64))
         f.cland = cl
         sc -= W_LANDING * (cl[s + n] - cl[s]) / n
+    if CARRIED[0]:                                               # a head looking at its own skis
+        if not hasattr(f, 'cground'):
+            f.cground = csum(np.clip((-f.elev - GROUND_DEG[0]) / (GROUND_DEG[1] - GROUND_DEG[0]), 0, 1))
+        sc -= W_GROUND * (f.cground[s + n] - f.cground[s]) / n
     if moves:
         sig = window_moves(f, s, n)
         pen = np.zeros(s.size)
@@ -1492,6 +1504,10 @@ def place_moments(scenes, flights, musts, pools, used, rng):
                         continue                                 # the same single shot again
                     if need > have:
                         x['speed'] = min(x['speed'] * need / have, max(PIECE_MAX_SPEED, x['speed']))
+                    elif first and need >= PIECE_MIN_SPEED * have:
+                        # an opening piece a little shorter than the opening phrase fills it a little slower: a 12 s
+                        # clip of us turning round in a lift queue against a 14 s opening went to the second scene
+                        x['speed'] = x['speed'] * need / have
                 sc = dict(scenes[i], shots=shots) if whole else scenes[i]
                 sc['must'] = (fi, lo, hi, end_at)
                 r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng)
