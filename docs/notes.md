@@ -103,6 +103,17 @@ renders (same frame count as the original), telemetry from the original.
   snow and a shadow: such shots were 40-45° down against −8..+8° for the views and −29° for a skier up close,
   so 30-40° down pays `W_GROUND`. Clips lose 1 s at each end (a button), not the 3 s and 5 s of a flight: a 13 s
   clip of us in a lift queue had kept 5 s. ([arkhyz](examples/arkhyz.md))
+- **Flown or carried, per clip** (`camera.py`, `camera = "auto"`: a trip filmed with a drone and a GoPro in a
+  hand). A GoPro is either (fpv2022 on a drone, Arkhyz on a helmet), so not by the file name: by its own
+  accelerometer (GPMF ACCL, ~200 a second). A drone's thrust moves the acceleration under 5 Hz by 1.6-5.4 m/s²
+  RMS over every flight of over 15 s, a skier's helmet or hand by 0.2-1.1; the threshold is 1.35. Blind on four
+  more shoots (Dagestan FPV, two SUP shoots, a birthday: 33 clips) it called every one flown, and the frames were
+  all from the air (a prop guard in view on one). The camera's rotation does not tell them apart (a calm flight
+  peaked at 93-138 deg/s, a run down a slope at 55-134); vibration over 20 Hz overlapped too. Clips of a few
+  seconds before a take-off read carried (1.1-1.2: on the ground or in a hand), which they were. A clip without
+  an accelerometer (DJI, stabilized elsewhere) is flown. edit.py `--cameras` makes every carried rule per clip
+  (trims, landings, lean, dives, the ground, views opening); montage.py looks for the pilot and close passes in
+  the flown clips only.
 - **GPS speed and climb** (`gps.py track`, GPS5/GPS9 every ~18th of a second): what a carried camera's action
   is. `--speed W` puts the ground speed into the piloting score (ranked over all footage, the middle rank where
   there is no fix). The climb tells a lift from a run: of 66 min of a ski holiday, one chairlift ride rose

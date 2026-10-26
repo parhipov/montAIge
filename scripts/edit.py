@@ -65,8 +65,15 @@ SKILL_PARTS = dict(parallax=0.45, lean=0.25, rotation=0.30)       # action: loud
 CINE_PARTS = dict(parallax=0.55, lean=0.30, smooth=0.15)          # cinematic: quiet music
 # a camera carried by a person (--carried; montage.py's `camera = "carried"`: in a hand, on a helmet or the chest,
 # skiing, cycling, walking): nobody pilots it, so its pitch is where the head looks, not speed or a dive. No lean
-# in the piloting scores, no dive / pull-up / descent manoeuvres, and a stop is not a landing
-CARRIED = [False]
+# in the piloting scores, no dive / pull-up / descent manoeuvres, and a stop is not a landing. Per clip with
+# --cameras (camera.py: a trip filmed both ways), else --carried for all of them
+CARRIED, CAMERAS = [False], {}
+
+
+def carried_of(f):
+    """The clip of this flight was carried by a person, not flown (see CARRIED)."""
+    return CAMERAS.get(f.name.lower(), 'carried' if CARRIED[0] else 'drone') == 'carried'
+
 # ... and a head looking down at the snow under its skis (camera GROUND_DEG below the horizon and lower: nothing in the
 # picture but snow and a shadow) is an empty shot: W_GROUND x its share, on a ramp between the two angles. On a
 # helmet GoPro the shots of snow alone were -40..-45 deg, the views -8..+8, a skier up close -29 (Arkhyz)
@@ -585,7 +592,7 @@ class Flight:
         e = np.pad(self.elev, h, mode='edge')
         rise = e[2 * h:] - e[:-2 * h]
         up_, _ = find_peaks(rise, height=PULLUP_DEG, distance=int(1.5 * fps))
-        if CARRIED[0]:                                           # a head looking down or up
+        if carried_of(self):                                     # a head looking down or up
             dp, up_ = dp[:0], up_[:0]
         self._events = ([(c, rot1[c] / TRICK_DEG, ('loop', 'spin', 'roll')[int(np.argmax(ax1[c]))]) for c in tp]
                         + [(c, down[c] / DIVE_DEG, 'dive') for c in dp]
@@ -603,7 +610,7 @@ class Flight:
     def _usable(self):
         fps, n = self.fps, self.n
         u = np.ones(n, bool)
-        head, tail = CARRIED_TRIM_S if CARRIED[0] else (3.0, 5.0)  # a take-off and a landing, or a button pressed
+        head, tail = CARRIED_TRIM_S if carried_of(self) else (3.0, 5.0)  # a take-off and a landing, or a button
         u[:int(head * fps)] = False
         u[n - int(tail * fps):] = False
         raw = np.linalg.norm(self.rates, axis=1)
@@ -624,7 +631,7 @@ class Flight:
         u &= ~still
         # landings: the approach and the touchdown before each stretch on the ground, marked (W_LANDING), not cut
         self.landing = np.zeros(n, bool)
-        for a in ([] if CARRIED[0] else np.flatnonzero(np.diff(still.astype(int)) == 1) + 1):
+        for a in ([] if carried_of(self) else np.flatnonzero(np.diff(still.astype(int)) == 1) + 1):
             self.landing[max(a - int(LANDING_S * fps), 0):a] = True
         if self.flow is not None:                                # blown-out / black picture
             br = self.flow['bright']
@@ -659,8 +666,9 @@ class Flight:
         rk = {k: np.where(np.isnan(v), 0.5, prank(v, ranks[k])) for k, v in parts.items() if k in ranks}
         rk['smooth'] = 1.0 - rk['jerk']
 
-        def mix(w):
-            return sum(w[k] * rk[k] for k in w if k in rk) / sum(w[k] for k in w if k in rk)
+        def mix(w):                                              # a carried camera's pitch is no lean
+            w = {k: v for k, v in w.items() if k in rk and not (k == 'lean' and carried_of(self))}
+            return sum(w[k] * rk[k] for k in w) / sum(w.values())
         self.skill = mix(SKILL_PARTS)                            # action
         self.cine = mix(CINE_PARTS)                              # cinematic
         self.cs, self.cc = csum(self.skill), csum(self.cine)
@@ -672,7 +680,8 @@ class Flight:
             ev += [(c, 1.2, 'pass') for c in pk]
             # descent from height: looking well down while everything is far away
             low = np.flatnonzero(uniform_filter1d(self.elev, int(2 * self.fps)) < -DESCENT_DEG)
-            for seg in (np.split(low, np.flatnonzero(np.diff(low) > 1) + 1) if low.size and not CARRIED[0] else []):
+            for seg in (np.split(low, np.flatnonzero(np.diff(low) > 1) + 1) if low.size and not carried_of(self)
+                        else []):
                 if seg.size >= DESCENT_S * self.fps and par[seg].mean() < DESCENT_FAR:
                     ev.append((int(seg[seg.size // 2]), 1.2, 'descent'))
         tilt_ok = getattr(self, 'tilt_ok', None)                 # motion from the picture: see vis_motion.TRUST_INL
@@ -873,7 +882,8 @@ def finish_flights(out):
     for k in ('parallax', 'lean', 'rotation', 'jerk', 'speed'):
         vals = [f.raw_skill_parts().get(k) for f in out]
         if all(v is not None for v in vals):
-            pool = np.concatenate([v[f.usable] for v, f in zip(vals, out)])
+            pool = np.concatenate([v[f.usable] for v, f in zip(vals, out) if k != 'lean' or not carried_of(f)]
+                                  or [np.array([np.nan])])
             if np.isfinite(pool).any():
                 ranks[k] = np.sort(pool[np.isfinite(pool)])
     for f in out:
@@ -1236,7 +1246,7 @@ def add_reveals(flights, cache):
             j += int(np.argmax(rise[j:j + 2 * k]))
             c = min(int(fr[j]), f.n - 1)
             a, b = max(c - int(1.5 * f.fps), 0), min(c + int(2 * f.fps), f.n)
-            if f.usable[c] and (not CARRIED[0] or f.vis[c:b].mean() <= REVEAL_SLOW * f.vis[a:c].mean()):
+            if f.usable[c] and (not carried_of(f) or f.vis[c:b].mean() <= REVEAL_SLOW * f.vis[a:c].mean()):
                 found.append(c)
             j += 2 * k
         if found:
@@ -1376,7 +1386,7 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
         cl = f.cland if hasattr(f, 'cland') else csum(f.landing.astype(np.float64))
         f.cland = cl
         sc -= W_LANDING * (cl[s + n] - cl[s]) / n
-    if CARRIED[0]:                                               # a head looking at its own skis
+    if carried_of(f):                                            # a head looking at its own skis
         if not hasattr(f, 'cground'):
             f.cground = csum(np.clip((-f.elev - GROUND_DEG[0]) / (GROUND_DEG[1] - GROUND_DEG[0]), 0, 1))
         sc -= W_GROUND * (f.cground[s + n] - f.cground[s]) / n
@@ -2200,6 +2210,9 @@ def make_parser():
     ap.add_argument('--carried', action='store_true',
                     help='the camera is carried by a person (hand, helmet, chest), not flown: no lean in the piloting '
                          'scores, no dives, pull-ups or descents, no landings (montage.py: camera = "carried")')
+    ap.add_argument('--cameras', default=None,
+                    help='JSON {clip name: "drone" | "carried"} from camera.py, per clip; the others as --carried says '
+                         '(montage.py: camera = "auto")')
     ap.add_argument('--speed', type=float, default=0.0,
                     help='GPS ground speed (gps.py track) in the piloting scores: this share of the action score '
                          'against parallax 0.45, rotation 0.30, lean 0.25 (half of it in the cinematic one), e.g. 0.5')
@@ -2242,9 +2255,10 @@ def apply_options(a):
                     ([a.subject + '_not'] if a.subject else []))
     W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN = a.people, a.fly, a.beauty, a.picked, a.joins
     CARRIED[0] = a.carried
-    if a.carried:
-        SKILL_PARTS.pop('lean', None)
-        CINE_PARTS.pop('lean', None)
+    CAMERAS.clear()
+    if a.cameras:
+        with open(a.cameras, encoding='utf-8') as fh:
+            CAMERAS.update(json.load(fh))
     if a.speed:
         SKILL_PARTS['speed'], CINE_PARTS['speed'] = a.speed, a.speed / 2
     CHAPTERS[:] =[int(v) for v in a.chapters.split(',')] if a.chapters else []

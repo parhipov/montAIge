@@ -72,6 +72,37 @@ def gps_points(buf, every=False):
     return out
 
 
+def gpmf_stream(path, want):
+    """Every sample of one 3-axis int16 GPMF stream of a clip (b'ACCL' m/s2, b'GYRO' rad/s), scaled, and its rate
+    (samples a second); (None, 0) without it."""
+    f, _, _, tracks = open_mp4(path)
+    rows = []
+
+    def walk(b):
+        scal = 1.0
+        for key, typ, size, rep, data in klv(b):
+            if typ == '\x00':
+                walk(data)
+            elif key == b'SCAL' and typ in 'lLsS':
+                fmt = {'l': 'i', 'L': 'I', 's': 'h', 'S': 'H'}[typ]
+                scal = np.array(struct.unpack('>%d%s' % (len(data) // struct.calcsize(fmt), fmt), data), float)
+            elif key == want and typ == 's' and size == 6:
+                rows.append(np.frombuffer(data[:6 * rep], '>i2').reshape(rep, 3) / scal)
+    try:
+        tr = next((t for t in tracks if t.formats and t.formats[0] == b'gpmd'), None)
+        if tr is None:
+            return None, 0.0
+        for _, _, data in tr.samples(f):
+            walk(data)
+        dur = tr.duration / tr.timescale
+    finally:
+        f.close()
+    if not rows:
+        return None, 0.0
+    a = np.vstack(rows)
+    return a, len(a) / dur
+
+
 def clip_gps(path):
     """GPS points of a clip with a 2D or 3D fix, one per GPMF sample (about a second)."""
     f, _, _, tracks = open_mp4(path)

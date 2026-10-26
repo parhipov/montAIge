@@ -81,7 +81,8 @@ side by side in `out/<job>/4k/`.
 
 ```toml
 footage = ["/path/to/footage"]                    # folders (with subfolders) or clips
-camera = "carried"                                # in a hand or on a helmet, not flown (default "drone")
+camera = "carried"                                # in a hand or on a helmet, not flown (default "drone");
+                                                  # "auto": per clip by its accelerometer (camera.py, GoPro)
 lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log footage only
 objects = true                                    # vehicles and animals (objects.py)
 args = ["--people", "4"]                          # edit.py options of every edit, before each edit's own
@@ -111,7 +112,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   EDL` (a series from one shoot: keep earlier edits' footage out).
 - A camera carried by a person (skiing, cycling, walking; `camera = "carried"` in the job file): `--carried`
   (no pilot, no landings, no lean, dives or pull-ups: the pitch is where the head looks), `--speed W` (GPS
-  ground speed from `gps.py track` in the piloting score, e.g. 0.5; a drone with a GoPro too).
+  ground speed from `gps.py track` in the piloting score, e.g. 0.5; a drone with a GoPro too). A trip filmed both
+  ways: `camera = "auto"`, `--cameras FILE` (camera.py's verdict per clip).
 - Flying: `--fly N` (flying scenes around a manoeuvre on the biggest lifts), `--ramps`, `--heroes N` (the
   hero ramp, never the same manoeuvre kind twice), `--pace` (loud phrases 1.1-1.2x), `--lively` (4-beat shots
   in loud phrases), `--want KIND` (e.g. `ascent`; `reveal`: a view opening up, any camera), `--arcs N` (whole
@@ -143,6 +145,7 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `timeline.py out/<job> --sql "SELECT ..."`: every feature in one SQLite table, a row per clip per 0.5 s (speed,
   altitude, rotation, parallax, people and each main character, beauty, activity) and a row per person: questions
   across features in one query instead of a one-off script. montage.py rebuilds it after `features`.
+- `camera.py CLIP|--list FILE`: flown or carried, from a GoPro's accelerometer.
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.
 - `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg [--cuts]`, `final.py`, `dji_join.py`,

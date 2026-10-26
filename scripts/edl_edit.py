@@ -93,6 +93,7 @@ def edit_options(a, extra, e):
         import montage
         with open(a.job, 'rb') as fh:
             job = tomllib.load(fh)
+        job['_out'] = os.path.dirname(os.path.abspath(a.job))      # out/<job>/job.toml: cameras.json beside it
         ed = next((x for x in job.get('edit', []) if x['name'] == a.edit), None)
         if ed is None:
             raise SystemExit(f'{a.job}: no edit named {a.edit}')

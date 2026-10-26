@@ -15,7 +15,8 @@ paths in it); the job's name is its folder (or `name = ...`):
     lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # only for log footage
     renders = 3                              # Gyroflow renders at once (default 3)
     camera = "carried"                       # carried by a person (hand, helmet, chest), not flown: no pilot,
-                                             # no close passes, edit.py --carried (default "drone")
+                                             # no close passes, edit.py --carried (default "drone"); "auto": per
+                                             # clip by its accelerometer (camera.py), a trip filmed both ways
     people = true                            # poses, pilot, close passes (default true)
     objects = false                          # animals, vehicles (objects.py)
     places = true                            # CLIP frame embeddings for find:TEXT pieces (default true)
@@ -62,6 +63,7 @@ Main characters (people.py subject / who / split) are a job's own business: run 
 import argparse
 import fnmatch
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -209,6 +211,9 @@ def features(job, out, proxy):
         raise SystemExit(f'{len(missing)} renders missing, e.g. {missing[0]}: run the render step')
     yolo = os.path.join(MODELS, 'yolo')
     log = os.path.join(out, 'features.log')
+    if job.get('camera') == 'auto' and not os.path.exists(os.path.join(out, 'cameras.json')):
+        run([os.path.join(HERE, 'camera.py'), '--list', os.path.join(out, 'originals.txt'),
+             '--out', os.path.join(out, 'cameras.json')])
     run([os.path.join(HERE, 'analyze.py')] + renders, log)
     before = [r for c, r in zip(originals(out), renders) if stabilized_before(c)]
     if before:                                                   # their motion, from the picture
@@ -221,15 +226,16 @@ def features(job, out, proxy):
     if job.get('people', True):
         run([os.path.join(HERE, 'people.py'), 'detect'] + renders +
             ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--objects', os.path.join(yolo, 'yolov8s.pt')], log)
-        if carried(job):                                         # nobody pilots a carried camera
-            for r in renders:
-                b = os.path.splitext(r)[0]
-                if os.path.exists(b + '_people.npz'):
-                    np.save(b + '_pilot.npy', np.zeros(len(np.load(b + '_people.npz')['frame']), bool))
-        else:
-            run([os.path.join(HERE, 'people.py'), 'pilotclip'] + renders +
+        kinds = camera_kinds(job, out)
+        flown = [r for c, r in zip(originals(out), renders) if kinds(c) == 'drone']
+        for c, r in zip(originals(out), renders):                # nobody pilots a carried camera
+            b = os.path.splitext(r)[0]
+            if kinds(c) == 'carried' and os.path.exists(b + '_people.npz'):
+                np.save(b + '_pilot.npy', np.zeros(len(np.load(b + '_people.npz')['frame']), bool))
+        if flown:
+            run([os.path.join(HERE, 'people.py'), 'pilotclip'] + flown +
                 ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'pilot_check.jpg')], log)
-            run([os.path.join(HERE, 'people.py'), 'passes'] + renders +
+            run([os.path.join(HERE, 'people.py'), 'passes'] + flown +
                 ['--weights', os.path.join(yolo, 'yolov8s-pose.pt'), '--sheet', os.path.join(out, 'passes_check.jpg')],
                 log)
     if job.get('who') and job.get('people', True):               # main characters by example
@@ -302,15 +308,28 @@ def auto_target(proxy, tag):
 def carried(job):
     """The camera of the job is carried by a person (hand, helmet, chest), not flown: `camera = "carried"`."""
     cam = job.get('camera', 'drone')
-    if cam not in ('drone', 'carried'):
-        raise SystemExit(f'camera = {cam!r}: "drone" (default) or "carried"')
+    if cam not in ('drone', 'carried', 'auto'):
+        raise SystemExit(f'camera = {cam!r}: "drone" (default), "carried" or "auto" (per clip, camera.py)')
     return cam == 'carried'
+
+
+def camera_kinds(job, out):
+    """clip path -> 'drone' | 'carried': the job's camera, or with "auto" camera.py's verdict per clip (out/
+    cameras.json; a clip without one, e.g. DJI or stabilized elsewhere, is flown)."""
+    if job.get('camera') != 'auto':
+        k = 'carried' if carried(job) else 'drone'
+        return lambda c: k
+    with open(os.path.join(out, 'cameras.json'), encoding='utf-8') as fh:
+        v = json.load(fh)
+    return lambda c: v.get(os.path.splitext(os.path.basename(c))[0].lower(), 'drone')
 
 
 def edit_args(job, e):
     """edit.py options of an edit: the job's `args` (all edits: the people weight, themes of the shoot),
-    then the edit's own (a later value wins); --carried for a carried camera."""
-    return (['--carried'] if carried(job) else []) + [str(a) for a in job.get('args', []) + e.get('args', [])]
+    then the edit's own (a later value wins); --carried for a carried camera, --cameras for "auto"."""
+    cam = ['--carried'] if carried(job) else \
+        ['--cameras', os.path.join(job['_out'], 'cameras.json')] if job.get('camera') == 'auto' else []
+    return cam + [str(a) for a in job.get('args', []) + e.get('args', [])]
 
 
 def check_edits(job):
