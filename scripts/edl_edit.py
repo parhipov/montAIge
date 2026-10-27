@@ -189,7 +189,7 @@ def replace(e, ks, o, cache, clip=None):
     rng = edit.apply_options(o)
     flights = load_flights(e, cache)
     edit.prepare_flights(flights, o)
-    m = edit.analyse_music(e['music'], e['bpm'])
+    m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     acc, d0 = m['acc'], m['downbeat']
     scenes = []
     for s in e['scenes']:
@@ -279,7 +279,7 @@ def render_edl(e, out, height=480, fps=25):
         n, _ = edit.frame_count(p)
         flights[f['idx']] = types.SimpleNamespace(idx=f['idx'], proxy=p, stab=f['render'], fps=f['fps'], n=n,
                                                   match=f.get('match'))
-    m = edit.analyse_music(e['music'], e['bpm'])
+    m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     m['path'] = e['music']
     lut = edit.CubeLUT(e['lut']) if e.get('lut') else None
     edit.render(e['scenes'], flights, m, out, height, fps, lut=lut, zoom=e.get('zoom') or 1.0)

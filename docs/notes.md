@@ -58,6 +58,14 @@ renders (same frame count as the original), telemetry from the original.
   onset peaks found 1 of those and put their hits on the beat before (a strum), so cuts moved onto them came 0.5 s
   early. With the booms as hits (a jump of 20 dB, within 6 dB of the track's loud sub-bass) 20 of 20 sit on
   downbeats, and every cut of the edit did too (15 of 15; 6 of 16 before).
+- **Booms by default, at 10 dB.** A rock track at 128 BPM whose sub-bass never falls silent had its booms at
+  +12..+18 dB (two after a silence +52..+55), its plain kicks under +8.1: 20 dB found 3 of 8 and the owner heard
+  "booms and no cut" at three of the others. Now the hits are the onsets and the booms together (`--booms` only
+  the booms, `--no-booms` only the onsets) and a boom jumps 10 dB. That track also has two extra bars in its
+  middle, so the shortened cut put its booms 8 beats into the phrases of the whole track's grid: a scene of one
+  shot (an editor's piece of a whole phrase, a flying scene) held a boom uncut. One-shot scenes now go to a
+  phrase without a boom inside first, a flying scene over a boom keeps its two shots, and pieces of 3 s (half a
+  phrase) leave the cut on the boom. All 8 booms of the edit got a cut.
 - **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
   with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
   pieces return 404.
@@ -158,6 +166,26 @@ renders (same frame count as the original), telemetry from the original.
   the flown clips only. Missed once: a gentle cinewhoop with a soft-mounted GoPro (moose) read carried, 1.06 over
   the clip with 28 s on the grass before the take-off, 0.6-1.8 per 10 s in the air, and no walking cadence
   (1.5-2.5 Hz) either; the job file said `camera = "drone"`.
+- **A hand camera beside a drone** (an Avata 2 flown in a gym, an Osmo Action 3 and GoPros on the floor and the
+  ring posts). Without the accelerometer (GoPro exports stabilized elsewhere, DJI files) there is no verdict, so
+  `cameras.json` was written by hand. What the drone rules did to the rest: a camera standing still is "on the
+  ground", and the GoPros set down kept 10-23 % of their footage (a still hand camera is a shot now); flying
+  scenes took the GoPros, whose motion from the picture scored gloves past the lens as manoeuvres (7 of 10
+  scenes; `--fly` takes only flown clips when a job has both); a whip of the hand camera to the ceiling scored
+  "turn" 0.94. Turning over 60 deg/s told it apart: 46 % of its frames against 0-3 % in close-ups of pads, a bag,
+  wraps or sparring (the hand camera's 90th percentile 22 deg/s), and it pays `W_SWING` 10 per share (4 left it
+  in: its piloting and its onset on a boom outweighed 1.8). Neither the people boxes (a person at the frame's
+  edge: 0.75-0.86 "aimed" in the bad shots against 0.88-1.0), CLIP ("a blurry floor", "a glove over the lens":
+  0.22-0.30 on all of that GoPro, 0.71 on hands being wrapped) nor sharpness against the clip's median told the
+  shots "looking past" from the good ones: a GoPro swinging inside the ring or picked up by someone was left
+  out of the job instead.
+- **No gyro in the file** (an Osmo Action 3 with RockSteady): its DJI track has no fused-attitude quaternions,
+  and Gyroflow's export of it is the identity all along. montage.py exports Gyroflow's motion for such a clip;
+  an export that does not move sends the clip to `vis_motion.py` like one stabilized before (80 deg wide where
+  it calibrated, 77-86).
+- **A clock never set** (an Osmo dating its clips 2000-03-30 beside a drone's 2026-02-27): a clip before 2010 has
+  no recording time and takes the day of the others when they share one. As a day of its own it held the hand
+  camera's close-ups to its three scenes, two of them with a boom inside.
 - **GPS speed and climb** (`gps.py track`, GPS5/GPS9 every ~18th of a second): what a carried camera's action
   is. `--speed W` puts the ground speed into the piloting score (ranked over all footage, the middle rank where
   there is no fix). The climb tells a lift from a run: of 66 min of a ski holiday, one chairlift ride rose
@@ -170,6 +198,10 @@ renders (same frame count as the original), telemetry from the original.
 - **Image motion** (`analyze.py`): Farneback flow on 160 px grey frames at half the frame rate, a global
   affine fit; the residual (p90) is what camera rotation cannot explain, i.e. parallax from things close by.
   An aggressive flight had a median of 1.7 against 0.9 for calm ones.
+- **Two aspects in one edit** (a 4:3 drone, 16:9 hand cameras): the preview took the first clip's aspect and
+  stretched the others, and the look thumbnails (9 rows, 12 or 16 columns) could not be compared. Every clip is
+  now scaled to cover the frame and cut in its centre (`--width` sets the preview's aspect), and the thumbnails
+  compare on their 4:3 centre. `final.py` still assumes one aspect.
 - **Look-alikes:** 12×9 Lab thumbnails, RMS distance; σ = 0.56 × the median distance between random frames
   (22 on a construction site, 15.5 in a grey hall; a fixed 22 counted 71 pairs alike in the hall, the scaled
   one 9). Thumbnails do not see one subject from different angles; whole-frame CLIP does not either (random

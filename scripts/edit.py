@@ -158,7 +158,14 @@ HIT_ON, HIT_MIN, HIT_FULL, HIT_RAMP_W = [True], [HIT_MIN_BEATS], [1.0], 3.0
 # at 120 BPM (guitar, bass and drums) had its bass come in on the downbeats of bars 2-4 of every band phrase,
 # +31..+42 dB (the downbeat of bar 1 +16: the bass rings on into it); the mix's onset peaks found 1 of those, and
 # put their hits on the beat before (a strum), so cuts sat 0.5 s ahead of the boom: "cuts on the boom" (an owner)
-BOOMS, BOOM_BAND, BOOM_PRE_S, BOOM_JUMP_DB, BOOM_LEVEL_DB = [False], (30.0, 90.0), (0.25, 0.05), 20.0, 6.0
+# put their hits on the beat before (a strum), so cuts sat 0.5 s ahead of the boom: "cuts on the boom" (an owner).
+# By default the hits are both, a boom at its strength (1-2) beside the mix's onsets ('both'; --booms: only the
+# booms, --no-booms: only the onsets): a boom left inside one long shot at 14.8 s of a gym promo ("an obvious boom,
+# why no cut?"). A shot that is a whole phrase (an editor's piece, a flying scene) goes to a phrase without a boom
+# inside first (BOOM_INSIDE): a song with two extra bars in its middle had its booms there 8 beats into a phrase
+# BOOM_JUMP_DB 20 missed the booms of a track whose sub-bass does not fall silent before them (+12..18 dB at 29.8,
+# 36.8, 44.3 s: "booms and no cut"); its plain kicks jump under 8.1 dB, the pop song's bar-1 downbeat +16
+BOOMS, BOOM_BAND, BOOM_PRE_S, BOOM_JUMP_DB, BOOM_LEVEL_DB = ['both'], (30.0, 90.0), (0.25, 0.05), 10.0, 6.0
 # W_NEAR: footage close in time to a shot of another scene, exp(-gap / NEAR_TAU_S); at 8 s and 0.5 two
 # passes over the same warm-up 17 s apart (split files of one recording) opened the tennis "game" edit
 NEAR_TAU_S = 20.0
@@ -181,6 +188,11 @@ W_SIZE, SIZE_MEDIUM, SIZE_CLOSE = 0.0, 0.01, 0.06
 W_ROLE, ROLE_END_S = 0.0, 1.5
 # people (objects.py / YOLO): a person covering PEOPLE_FULL of the frame counts fully, smaller ones less
 W_PEOPLE, PEOPLE_FULL = 0.0, 0.02
+# a carried camera swung away: turning faster than SWING_DPS, W_SWING x the share of the shot. In a hand it is the
+# camera leaving its subject, not a manoeuvre: a whip to a gym's ceiling had 46 % of its frames over 60 deg/s and
+# scored "turn" 0.94; close-ups of pads, a bag, wraps, sparring 0-3 % (the hand camera's 90th percentile 22 deg/s).
+# W 4 left that whip in: its piloting (W_SKILL x 0.94 against ~0.5) and its onset on a boom (W_HIT) outweighed 1.8
+SWING_DPS, W_SWING = 60.0, 10.0
 # people-first edits (--people): a shot with nobody in it outside the flying scenes; the pilot alone
 # (worth PILOT_WORTH at most) does not count as company
 W_EMPTY, EMPTY_BELOW = 4.0, 0.35
@@ -210,6 +222,9 @@ W_AWAY, W_IMPOSTOR, IMPOSTOR_AREA, PEER_TAGS = 2.0, 8.0, 0.01, []
 ANIMAL_WORTH = 1.0      # a cat or a dog (objects.py) against a person of the same size
 # flying scenes (--fly N): on the biggest music lifts people do not count, piloting counts W_FLY extra
 MAX_FLY, W_FLY = 0, 3.0
+# ... and they show a flight: with flown and carried clips in one job (a drone and hand cameras of a gym) a carried
+# clip never takes one (a GoPro among sparring boxers scored as piloting from its picture: 7 of 10 scenes)
+FLOWN_ANY = [False]
 # --sections: heroes and flying scenes go to the chorus (music_edit.sections), the first chorus first; with
 # --lively, the 4-beat shots too (phrases outside the chorus keep CALM_PATTERNS)
 SECTIONS, CALM_PATTERNS = [False], {}
@@ -575,6 +590,10 @@ def set_beauty(flights):
         f.cc = csum(f.cine)
 
 
+# look thumbnails of two aspects compare on the 4:3 window (a 16:9 hand camera beside a 4:3 drone)
+LOOK_ROWS, LOOK_COLS = 9, 12
+
+
 def load_look(stab, proxy_dir):
     """(step, thumbnails every `step` frames) from looks.py, or None."""
     if not proxy_dir:
@@ -583,7 +602,12 @@ def load_look(stab, proxy_dir):
     if not os.path.exists(p):
         return None
     z = np.load(p)
-    return int(z['step']), z['desc'].astype(np.float64)
+    d = z['desc'].astype(np.float64)
+    w = d.shape[1] // (LOOK_ROWS * 3)                            # analyze.py: 9 rows, the width from the aspect
+    if w > LOOK_COLS:                                            # wider than 4:3: its centre, as render crops it
+        x0 = (w - LOOK_COLS) // 2
+        d = d.reshape(len(d), LOOK_ROWS, w, 3)[:, :, x0:x0 + LOOK_COLS].reshape(len(d), -1)
+    return int(z['step']), d
 
 
 class CubeLUT:
@@ -730,7 +754,8 @@ class Flight:
             vib = np.sqrt(uniform_filter1d((hf ** 2).sum(1), int(2 * fps)))
             calm = (vib < 1.5) & (self.vis < 3.0)
         still = uniform_filter1d(calm.astype(float), int(2 * fps)) > 0.9
-        u &= ~still
+        if not carried_of(self):                                 # a hand camera held still or set down is a shot
+            u &= ~still
         # landings: the approach and the touchdown before each stretch on the ground, marked (W_LANDING), not cut
         self.landing = np.zeros(n, bool)
         downs = [] if carried_of(self) else np.flatnonzero(np.diff(still.astype(int)) == 1) + 1
@@ -838,6 +863,12 @@ def load_gps_speed(render, n, fps, off=0):
     return np.where((t < z['t'][ok][0] - 1) | (t > z['t'][ok][-1] + 1) | (gap > 0.99), np.nan, sp)
 
 
+# a camera whose clock was never set dates its clips 2000-01-01 on (an Osmo Action 3 not paired with the phone:
+# 2000-03-30 beside a drone's 2026-02-27 made a "day" of its own, and the hand camera's close-ups were held to its
+# three scenes): such a clip has no recording time, and its day is the others' when they all share one
+CLOCK_SET_FROM = 2010
+
+
 def creation_time(path):
     """When the recording of a file began. A GoPro chapter (GH02xxxx, GX03xxxx: the camera splits a recording at
     4 GB) carries the start of the whole recording, so it begins after the chapters before it."""
@@ -885,16 +916,20 @@ def owner_picked(path):
 
 def load_motion(src, cache_dir, render=None):
     """Per-frame camera orientation and where it comes from: Gyroflow's export if the cache has one ('gyro');
-    for a clip stabilized before (a `_stabilized` export without its original, see montage.py scan) the
-    orientation vis_motion.py found in its picture ('picture'); else DJI `djmd` ('gyro')."""
+    for a clip stabilized before (a `_stabilized` export without its original, see montage.py scan) or one whose
+    export does not move (no gyro in the file: stabilized in the camera) the orientation vis_motion.py found in
+    its picture ('picture'); else DJI `djmd` ('gyro')."""
     stem = os.path.splitext(os.path.basename(src))[0]
     gj = os.path.join(cache_dir, stem + '_gyroflow_camera.json')
+    flat = False
     if os.path.exists(gj):
         with open(gj, encoding='utf-8') as fh:
             d = json.load(fh)
         q = np.array([r['org_quat'] for r in d], float)
-        return q / np.linalg.norm(q, axis=1, keepdims=True), frame_count(src)[1], 'gyro'
-    if stabilized_before(src):
+        flat = np.ptp(q, axis=0).max() < 1e-9                    # no gyro in the file (Osmo Action 3, RockSteady)
+        if not flat:
+            return q / np.linalg.norm(q, axis=1, keepdims=True), frame_count(src)[1], 'gyro'
+    if flat or stabilized_before(src):
         vp = os.path.splitext(render or '')[0] + '_vis.npz'
         if not os.path.exists(vp):
             raise SystemExit(f'stabilized before, no motion from its picture yet: run vis_motion.py on {render}')
@@ -941,10 +976,18 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         fl.beauty = load_beauty(render, n)
         ex = load_people_extras(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n)
         fl.carea, fl.wave, fl.recede = csum(ex['area']), ex['wave'], ex['recede']
+        fl.csw = csum((np.linalg.norm(fl.rates, axis=1) > SWING_DPS).astype(float) if carried_of(fl) else np.zeros(n))
         fl.gps_speed = load_gps_speed(render, n, fps, off)
         fl.offset, fl.when = off, creation_time(src)
         fl.day = fl.when.date().isoformat()
         out.append(fl)
+    unset = [f for f in out if f.when.year < CLOCK_SET_FROM]
+    if unset:
+        days = sorted({f.day for f in out if f.when.year >= CLOCK_SET_FROM})
+        for f in unset:
+            f.when, f.day = None, days[0] if len(days) == 1 else None
+        print(f'  {len(unset)} clips with the camera clock never set ({unset[0].name}): no recording time, '
+              + (f'the day of the others ({days[0]})' if len(days) == 1 else 'no day'))
     return finish_flights(out)
 
 
@@ -1049,7 +1092,8 @@ def beat_grid(env, times, bpm0):
 
 
 def analyse_music(path, bpm_hint=None, booms=None):
-    """Beats, loudness and musical hits of a track; booms (default: --booms) takes the hits from the bass."""
+    """Beats, loudness and musical hits of a track; booms (default BOOMS: 'both', 'only', 'off'; an EDL's True or
+    False of before: 'only', 'off') says whether the hits are the mix's onsets, the bass booms or both."""
     y = mus.load_audio(path)
     sr = mus.SR
     env, low, times, rate = mus.onset_envelope(y)
@@ -1071,10 +1115,13 @@ def analyse_music(path, bpm_hint=None, booms=None):
     tb = ti(np.append(beats, beats[-1] + P))
     busy = np.array([env[a:max(b, a + 1)].mean() for a, b in zip(tb[:-1], tb[1:])])
     dphase = int(np.argmax([kick[p::4].mean() for p in range(4)]))   # downbeat: most kick
+    mode = {True: 'only', False: 'off', None: BOOMS[0]}.get(booms, booms)
+    boom = boom_hits(y, sr, beats)
+    hit = boom if mode == 'only' else music_hits(env, times, beats)
+    if mode == 'both':
+        hit = np.maximum(hit, boom)
     return dict(path=path, duration=y.size / sr, bpm=bpm, period=P, beats=beats, loud=loud,
-                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times,
-                hit=boom_hits(y, sr, beats) if (BOOMS[0] if booms is None else booms)
-                else music_hits(env, times, beats))
+                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times, hit=hit, boom=boom)
 
 
 def boom_hits(y, sr, beats):
@@ -1248,6 +1295,10 @@ def plan_scenes(m, rng):
         scenes.append(dict(kind='end', cls=scenes[-1]['cls'], shots=[last]))
     if HIT_ON[0]:
         hit_cuts(scenes, m['hit'], nb, shot)
+    boom = m.get('boom') if HIT_ON[0] and BOOMS[0] != 'off' else None
+    for sc in scenes:                                            # a boom after the scene's first beat
+        b0, b1 = sc['shots'][0]['b0'], sc['shots'][-1]['b0'] + sc['shots'][-1]['nbeats']
+        sc['boom_in'] = bool(boom is not None and boom[b0 + 1:b1].any())
     # hero: at most MAX_HEROES, where the music lifts the most (coming back after a breakdown first)
     lifts = []
     for i, s in enumerate(scenes):
@@ -1268,7 +1319,8 @@ def plan_scenes(m, rng):
         s['fly'] = False
     cand = sorted(lifts, reverse=True) + sorted(((0, s['cls'], -i) for i, s in enumerate(scenes)
                                                  if s['kind'] == 'phrase' and i > 0), reverse=True)
-    for _, _, ni in cand:
+    cand = [c for c in cand if not scenes[-c[2]]['boom_in']] + [c for c in cand if scenes[-c[2]]['boom_in']]
+    for _, _, ni in cand:                                        # one shot: not over a boom inside, if others do
         if sum(s['fly'] for s in scenes) >= MAX_FLY:
             break
         if END_SET[0] and -ni == len(scenes) - 1:
@@ -1276,7 +1328,7 @@ def plan_scenes(m, rng):
         if not any(scenes[j]['fly'] for j in (-ni - 1, -ni, -ni + 1) if 0 <= j < len(scenes)):
             scenes[-ni]['fly'] = True
     for sc in scenes:                                            # a flight to something is shown whole: one shot
-        if sc['fly'] and len(sc['shots']) > 1:
+        if sc['fly'] and len(sc['shots']) > 1 and not sc['boom_in']:     # (a boom inside keeps its cut)
             x0 = sc['shots'][0]
             sc['shots'] = [shot(x0['b0'], sum(x['nbeats'] for x in sc['shots']), sc['cls'])]
     allshots = [x for s in scenes for x in s['shots']]
@@ -1536,9 +1588,13 @@ def shot_nodes(sh, f, n, pools, used, hero, slow_hero, rng, look=None, moves=(),
         sc += W_HIT * cov / hw[1:].sum()
     vw = (f.cvw[s + n] - f.cvw[s]) / n if W_BEAUTY and hasattr(f, 'cvw') else np.zeros(s.size)
     sc += W_BEAUTY * vw
+    if hasattr(f, 'csw'):
+        sc -= W_SWING * (f.csw[s + n] - f.csw[s]) / n
     if W_PICKED and f.picked:
         sc += W_PICKED
     if fly:
+        if FLOWN_ANY[0] and carried_of(f):
+            return out
         sc += W_FLY * qs
     elif W_PEOPLE and hasattr(f, 'cp'):
         pv = (f.cp[s + n] - f.cp[s]) / n
@@ -1796,7 +1852,7 @@ def chapters(scenes, flights, good=0.75):
     (seconds of footage whose piloting score, cinematic or action, is above `good`) and, with --beauty, its
     beautiful views (f.view above `good`): a day of calm flights over the most beautiful place (Dagestan, an old
     stone village on a mountain: 94-98 % scenic) had 71 good seconds of flying against 143 of a beach day."""
-    days = sorted({f.day for f in flights})
+    days = sorted({f.day for f in flights if f.day is not None})
     w = []
     for d in days:
         fs = [f for f in flights if f.day == d]
@@ -1817,7 +1873,7 @@ def chapters(scenes, flights, good=0.75):
     while cnt.sum() < n:
         cnt[np.argmax(share - cnt)] += 1
     if CHAPTERS:                                                 # the editor's own split (--chapters)
-        every = sorted({f.day for f in flights})
+        every = sorted({f.day for f in flights if f.day is not None})
         if len(CHAPTERS) != len(every) or sum(CHAPTERS) != n:
             raise SystemExit(f'--chapters {",".join(map(str, CHAPTERS))}: {len(every)} days ({", ".join(every)}) '
                              f'and {n} scenes to share')
@@ -1895,38 +1951,47 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         if own and not first:
             free = own
         best = None
+
+        def trial(i, whole):
+            """The moment planned into scene i (whole: the phrase as one shot); keeps the best."""
+            nonlocal best
+            shots = [merged(scenes[i]['shots'])] if whole else scenes[i]['shots']
+            saved = [x['speed'] for x in shots]
+            if fixed:
+                for x in shots:
+                    x['speed'] = fixed
+            if whole:
+                x = shots[0]
+                need, have = span + int(PIECE_AIR_S * f.fps), source_frames(x, f)
+                if len(scenes[i]['shots']) == 1 and need <= have:
+                    return                                       # the same single shot again
+                if need > have:
+                    x['speed'] = min(x['speed'] * need / have, max(PIECE_MAX_SPEED, x['speed']))
+                elif first and need >= PIECE_MIN_SPEED * have:
+                    # an opening piece a little shorter than the opening phrase fills it a little slower: a 12 s
+                    # clip of us turning round in a lift queue against a 14 s opening went to the second scene
+                    x['speed'] = x['speed'] * need / have
+            sc = dict(scenes[i], shots=shots) if whole else scenes[i]
+            sc['must'] = (fi, lo, hi, end_at)
+            r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng)
+            del sc['must']
+            if r is not None and shows(r, lo, hi, end_at, f.fps, sc['shots'][-1]) and                     (best is None or r[0] > best[0]):
+                best = (r[0], i, shots[0] if whole else None, r[1], r[2])
+            if not whole:                                        # the scene's own shots: speeds as they were
+                for x, s0 in zip(shots, saved):
+                    x['speed'] = s0
+
         for i in free:
             for whole in (False, True):
-                if whole and best is not None:
-                    continue
-                shots = [merged(scenes[i]['shots'])] if whole else scenes[i]['shots']
-                saved = [x['speed'] for x in shots]
-                if fixed:
-                    for x in shots:
-                        x['speed'] = fixed
-                if whole:
-                    x = shots[0]
-                    need, have = span + int(PIECE_AIR_S * f.fps), source_frames(x, f)
-                    if len(scenes[i]['shots']) == 1 and need <= have:
-                        continue                                 # the same single shot again
-                    if need > have:
-                        x['speed'] = min(x['speed'] * need / have, max(PIECE_MAX_SPEED, x['speed']))
-                    elif first and need >= PIECE_MIN_SPEED * have:
-                        # an opening piece a little shorter than the opening phrase fills it a little slower: a 12 s
-                        # clip of us turning round in a lift queue against a 14 s opening went to the second scene
-                        x['speed'] = x['speed'] * need / have
-                sc = dict(scenes[i], shots=shots) if whole else scenes[i]
-                sc['must'] = (fi, lo, hi, end_at)
-                r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng)
-                del sc['must']
-                if r is not None and shows(r, lo, hi, end_at, f.fps, sc['shots'][-1]) and \
-                        (best is None or r[0] > best[0]):
-                    best = (r[0], i, shots[0] if whole else None, r[1], r[2])
-                if not whole:                                    # the scene's own shots: speeds as they were
-                    for x, s0 in zip(shots, saved):
-                        x['speed'] = s0
+                if not (whole and (best is not None or scenes[i].get('boom_in'))):
+                    trial(i, whole)
             if first and best is not None:
                 break
+        for i in free if best is None else []:                   # one shot over a boom: when nothing else will do
+            if scenes[i].get('boom_in'):
+                trial(i, True)
+                if first and best is not None:
+                    break
         what = f'moment {f.name} {lo / f.fps:.1f}-{hi / f.fps:.1f}s'
         if best is None:
             print(f'  {what}: no scene can show it' +
@@ -2734,14 +2799,20 @@ def shot_pictures(x, f, reader, j_from, j_to, fps_out, to_rgb, zx, zy, W, H, lut
 
 
 def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=None, zoom=1.0, bites=(),
-           dissolve=0.0):
+           dissolve=0.0, width=None):
     with av.open(flights[0].proxy or flights[0].stab) as c0:             # keep the footage's aspect (4:3 or 16:9)
         cc = c0.streams.video[0].codec_context
         aspect = cc.width / cc.height
-    W = int(round(height * aspect / 2)) * 2
+    W = width or int(round(height * aspect / 2)) * 2
     H = height
     Wz, Hz = max(int(round(W * zoom / 2)) * 2, W), max(int(round(H * zoom / 2)) * 2, H)   # --zoom: centre cut
-    zx, zy = (Wz - W) // 2, (Hz - H) // 2
+
+    def cover(w, h):
+        """A clip scaled to cover Wz x Hz keeping its aspect, and the centre cut of W x H in it: footage of two
+        aspects (a 4:3 drone, 16:9 hand cameras) is cropped, never stretched."""
+        a = w / h
+        sw, sh = (int(round(Hz * a / 2)) * 2, Hz) if a > Wz / Hz else (Wz, int(round(Wz / a / 2)) * 2)
+        return dict(to_rgb, width=sw, height=sh), (sh - H) // 2, (sw - W) // 2
     dur = m['duration']
     oc = av.open(out, 'w')
     vs = oc.add_stream('libx264', rate=fps_out)
@@ -2773,12 +2844,12 @@ def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=No
             c = av.open(f.proxy or f.stab)
             st = c.streams.video[0]
             st.thread_type = 'AUTO'
-            readers[f.idx] = (c, st)
+            readers[f.idx] = (c, st), cover(st.codec_context.width, st.codec_context.height)
+        reader, (conv, zy, zx) = readers[f.idx]
         j0 = int(np.ceil(x['t0'] * fps_out - 1e-9))
         j1 = nout if si == len(shots) - 1 else int(np.ceil(x['t1'] * fps_out - 1e-9))
         h_in, h_out = halves[si], halves[si + 1] if si + 1 < len(shots) else 0
-        for jj, p, v, img in shot_pictures(x, f, readers[f.idx], j0 - h_in, j1 + h_out, fps_out, to_rgb, zx, zy, W, H,
-                                           lut):
+        for jj, p, v, img in shot_pictures(x, f, reader, j0 - h_in, j1 + h_out, fps_out, conv, zx, zy, W, H, lut):
             if jj >= j1 - h_out:                                 # kept for the dissolve into the next shot
                 tail[jj] = img
                 continue
@@ -2813,7 +2884,7 @@ def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=No
     for pk in vs.encode(None):
         oc.mux(pk)
     oc.close()
-    for c, _ in readers.values():
+    for (c, _), _ in readers.values():
         c.close()
     print()
 
@@ -2840,6 +2911,8 @@ def make_parser():
     ap.add_argument('--target', type=float, default=None, help='shorten the track to about this many seconds')
     ap.add_argument('--seed', type=int, default=None, help='variation number; omitted = deterministic best')
     ap.add_argument('--height', type=int, default=480)
+    ap.add_argument('--width', type=int, default=None,
+                    help='preview width (default: the aspect of the first clip at --height); other aspects are cropped')
     ap.add_argument('--fps', type=int, default=25)
     ap.add_argument('--no-ramps', action='store_true', help='constant speed inside shots')
     ap.add_argument('--debug', action='store_true', help='overlay shot info and a beat flash')
@@ -2900,8 +2973,9 @@ def make_parser():
     ap.add_argument('--no-hits', action='store_true',
                     help='no cuts moved or added onto the musical hits, no W_HIT for motion onsets meeting them')
     ap.add_argument('--booms', action='store_true',
-                    help='the musical hits are the bass booms: the sub-bass coming in after a gap (BOOM_*), not the '
-                         "mix's onset peaks")
+                    help='the musical hits are only the bass booms: the sub-bass coming in after a gap (BOOM_*), not '
+                         "the mix's onset peaks (by default both)")
+    ap.add_argument('--no-booms', action='store_true', help="the musical hits are only the mix's onset peaks")
     ap.add_argument('--heroes', type=int, default=0,
                     help='hero ramps (with --ramps) on this many of the biggest music lifts, never the same manoeuvre kind twice')
     ap.add_argument('--pace', action='store_true', help='loud phrases play 1.1-1.2x (BASE_SPEED_PACE): the flying looks faster')
@@ -2960,7 +3034,7 @@ def apply_options(a):
         TAIL_BEATS[0] = 16
         HIT_MIN[0] = HIT_MIN_LONG
     HIT_ON[0] = not a.no_hits
-    BOOMS[0] = a.booms
+    BOOMS[0] = 'only' if a.booms else 'off' if a.no_booms else 'both'
     if a.pace:
         BASE_SPEED.update(BASE_SPEED_PACE)
     if a.animals is not None:
@@ -3059,6 +3133,7 @@ def main():
     else:
         flights = find_flights(a.footage, cache, a.proxy_dir)
     prepare_flights(flights, a)
+    FLOWN_ANY[0] = any(not carried_of(f) for f in flights)
     for f in flights if not a.brief else []:
         kinds = ', '.join(f'{f.trick_kind.count(k)} {k}' for k in EVENT_KINDS
                           if f.trick_kind.count(k))
@@ -3275,7 +3350,7 @@ def main():
     if not a.plan_only:
         m['path'] = music_path
         render(scenes, flights, m, out, a.height, a.fps, a.debug, lut=lut, zoom=a.zoom, bites=bites,
-               dissolve=a.dissolve)
+               dissolve=a.dissolve, width=a.width)
     print(f'done in {time.time() - t0:.0f}s -> {out}')
 
 

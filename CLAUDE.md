@@ -126,8 +126,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`,
   `--seeds N` (N plans, the best kept by one score: piloting, hits met, onsets on beats, variety, look-alikes; a
   line per seed, ~10 s each), `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the
-  musical hits), `--booms` (the hits are the bass booms, the sub-bass coming in after a gap: "cuts on the boom"
-  of a song).
+  musical hits); the hits are the mix's onsets and the bass booms (the sub-bass coming in after a gap: "cuts on
+  the boom") together, `--booms` only the booms, `--no-booms` only the onsets.
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
   `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another
@@ -179,7 +179,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   proof.
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
   clip's colour matched to that clip's) (kept in the EDL for `final.py`).
-- `--plan-only`, `--debug`, `--height`, `--fps`, `--brief` (no footage table: montage.py prints it for the first
+- `--plan-only`, `--debug`, `--height`, `--width` (a preview of another aspect: every clip cropped to it, never
+  stretched; a 4:3 drone beside 16:9 hand cameras), `--fps`, `--brief` (no footage table: montage.py prints it for the first
   edit of a run only).
 
 ## Other tools

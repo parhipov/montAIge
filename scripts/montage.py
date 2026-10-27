@@ -142,6 +142,34 @@ def has_track(path, fourcc):
     return any(t.formats and t.formats[0] == fourcc for t in tracks)
 
 
+def gyroflow_motion(path, cache):
+    """The clip's motion comes from Gyroflow's export (gf_motion.py): no DJI `djmd` track (GoPro), or one without
+    fused-attitude quaternions (Osmo Action 3 keeps only its raw gyro there)."""
+    if stabilized_before(path):
+        return False
+    if os.path.exists(os.path.join(cache, os.path.splitext(os.path.basename(path))[0] + '_gyroflow_camera.json')):
+        return True
+    if not has_track(path, b'djmd'):
+        return True
+    import djimeta
+    try:
+        djimeta.frame_quats(path)
+    except SystemExit:
+        return True
+    return False
+
+
+def motionless_export(path, cache):
+    """Gyroflow's motion export of the clip stands still all along: no gyro in the file (an Osmo Action 3
+    stabilized in the camera). Its motion comes from the picture, like a clip stabilized before."""
+    gj = os.path.join(cache, os.path.splitext(os.path.basename(path))[0] + '_gyroflow_camera.json')
+    if not os.path.exists(gj):
+        return False
+    with open(gj, encoding='utf-8') as fh:
+        q = np.array([r['org_quat'] for r in json.load(fh)], float)
+    return len(q) == 0 or np.ptp(q, axis=0).max() < 1e-9
+
+
 def has_gcsv(path):
     """A Gyroflow IMU log next to the clip (<stem>.gcsv: RunCam Thumb, other cameras without a motion track in
     the file): Gyroflow reads it, lens profile included, for the render and the motion export (gf_motion.py)."""
@@ -228,7 +256,7 @@ def render(job, out, proxy, cache):
     if not gyroflow or not os.path.isfile(gyroflow):
         raise SystemExit('Gyroflow not found: set GYROFLOW or `gyroflow` in the job file')
     os.environ['GYROFLOW'] = gyroflow
-    gopro = [c for c in clips if not stabilized_before(c) and not has_track(c, b'djmd')]
+    gopro = [c for c in clips if gyroflow_motion(c, cache)]
     if gopro:
         lst = os.path.join(out, 'gopro.txt')
         open(lst, 'w', encoding='utf-8').write('\n'.join(gopro) + '\n')
@@ -273,7 +301,7 @@ def render(job, out, proxy, cache):
 
 
 # ------------------------------------------------------------------------------------------- features
-def features(job, out, proxy):
+def features(job, out, proxy, cache):
     renders = [os.path.join(proxy, os.path.splitext(os.path.basename(c))[0] + '_stabilized.mp4')
                for c in originals(out)]
     missing = [r for r in renders if not os.path.exists(r)]
@@ -285,7 +313,7 @@ def features(job, out, proxy):
         run([os.path.join(HERE, 'camera.py'), '--list', os.path.join(out, 'originals.txt'),
              '--out', os.path.join(out, 'cameras.json')])
     run([os.path.join(HERE, 'analyze.py')] + renders, log)
-    before = [r for c, r in zip(originals(out), renders) if stabilized_before(c)]
+    before = [r for c, r in zip(originals(out), renders) if stabilized_before(c) or motionless_export(c, cache)]
     if before:                                                   # their motion, from the picture
         run([os.path.join(HERE, 'vis_motion.py')] + before + (['--hfov', job['hfov']] if job.get('hfov') else []), log)
     gopro = [c for c in originals(out) if not stabilized_before(c) and has_track(c, b'gpmd')]
@@ -554,7 +582,7 @@ def main():
     if 'render' in steps:
         render(job, out, proxy, cache)
     if 'features' in steps:
-        features(job, out, proxy)
+        features(job, out, proxy, cache)
     if 'edits' in steps:
         edits(job, job_path, out, proxy, cache, a.plan_only)
     if 'qc' in steps and not a.plan_only:
