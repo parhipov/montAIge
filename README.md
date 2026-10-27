@@ -54,9 +54,14 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
     or over them, a main character described in words or shown by an example image;
   - places and activities by text query (CLIP), routes through several places, grouping clips by location;
   - earlier exports in the footage folder, matched to the original clips;
-  - beautiful views, on request, with beauty in the job's own words (mountains, a beach).
-- Editing: shot choice, pacing, how much of the pilot to show, the track, two or three variants. You comment
-  on 640 px previews, and the next preview follows the comments.
+  - beautiful views, on request, with beauty in the job's own words (mountains, a beach);
+  - the footage in words: a local vision-language model describes every three seconds ("a man is jumping into
+    the water from a boat"), so a moment is found by its words, and looks over every shot of an edit before you
+    see it.
+- Editing: shot choice, pacing (a build of shorter shots before a drop, a long one on it), shot sizes that
+  alternate, an establishing first shot and a closing last one, how much of the pilot to show, the track, the
+  footage's own sound under the music at a laugh or a splash, dissolves on calm music, a moment in slow motion,
+  two or three variants. You comment on 640 px previews, and the next preview follows the comments.
 - QC: an OK / WARN report for each edit (length, rhythm, people, piloting, repeated activities, dark or
   frozen frames).
 - Stabilization with [Gyroflow](https://gyroflow.xyz); finals in 4K.
@@ -173,6 +178,9 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `gps.py` | where a GoPro clip was shot, and how fast and which way up or down, from its GPS |
 | `timeline.py` | every feature in one SQLite table, a row per half second: questions across them in one query |
 | `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
+| `captions.py` | the footage in words every 3 s (Qwen3-VL, local), searched by words |
+| `review.py` | the model's line per shot of a finished edit: what it shows, what is wrong with it |
+| `sounds.py` | the clips' own sound in words (CLAP): laughter, a shout, a splash; the sound bites of an edit |
 | `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
 | `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, a named moment put in a shot, the ending taking over, the colour of two cameras matched |
 | `qc.py` | the OK / WARN report |

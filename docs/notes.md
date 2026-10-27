@@ -300,6 +300,54 @@ which owners call beautiful: those come in as editor's pieces.
   linear ramp a repeated person still came back (a person is worth `W_PEOPLE`). A shot under 2 s does not use
   a theme up. ([village](examples/village.md))
 - Fades: 0.6 s in, 2 s out, the same in the preview and the final.
+- **Build and release** (`--build`): editors build tension with shorter shots and let it go with a long one. The
+  phrase before a drop (the next phrase two energy classes up) is cut 8, 4, 2, 2 beats while a shot stays 1.2 s
+  (8, 4, 4 at 120 BPM and above), and the drop opens with a shot of 8 beats or more. Not under `--long`.
+- **Shot sizes** (`--sizes W`): in a people edit three close-ups in a row read as one long one. A window's size
+  class is the biggest person's share of the frame (medium from 1 %, close from 6 %); two shots in a row of the
+  same class, medium or close, pay W inside a scene and across its cuts. A ski edit of 18 shots had 4 such cuts of
+  17 at W 2 (the edit prints the count always); the first cut of the yacht edit went from 8 close-ups of 18 shots.
+- **Opening and closing shots** (`--roles W`): "an off-topic piece for a couple of seconds at the very start", "the
+  ending flew past them". The first shot earns W x how wide its view is (the REVEAL_WIDE texts against the
+  close ones on the frame embeddings), the last shot W x the best of people waving, the biggest person receding,
+  the wide view and the landing over its last 1.5 s; the edit prints both (0..1).
+- **A piece at its own speed** (`CLIP:SEC@0.5`): a jump off a yacht or a pass under someone in true slow motion
+  (50 fps shown at 25). The shot that holds the piece plays at that speed and is never bent; a piece too long for
+  its phrase at that speed plays as slow as fits (a 7 s piece asked at 0.5x in a 14 s phrase came out at 0.76x).
+  One or two per edit: editors warn against ramping everything.
+- **Dissolves** (`--dissolve S`): hard cuts are right for FPV, a calm report asks for a 0.5-1 s cross-dissolve.
+  The cut into a scene dissolves unless its beat is one of the track's stronger hits (the top half: cuts are
+  moved onto hits, so every hit would have left a calm track with no dissolves at all), the scene is a hero or
+  flying scene, or either shot is shorter than 2 S; the preview renders a pre-roll and a tail along the shot's
+  time map run straight at its end speeds, the final has them inside its 1 s margins. The EDL marks the scenes
+  (`dissolve_in`), so the final dissolves where the preview did.
+- **Sound bites** (`--bites N`, `sounds = true`; a `hear:TEXT` piece always): the clip's own sound under the music
+  for 2.5 s at a laugh, a shout, a splash, a crash, faded 0.25 s at both ends and brought to the music's level,
+  the music ducked to 0.3 with 0.3 s ramps. The moments come from CLAP's windows (sounds.py): its softmax over the
+  texts saturates at 1.0 on nearly every window, so a moment is ranked by the margin in cosine between its best
+  bite text and the best other sound: on 66 min of a ski holiday 13 % of the windows had a margin over 0, 3.5 %
+  over 0.05 (the threshold), and the snow under the skis reads as water splashing. In the mixed track the bite
+  windows differed from the music by an RMS of 0.19-0.21 (the music 0.16-0.19), the rest by 0.014 (the AAC).
+
+## The footage in words
+
+`captions.py` (job `captions = true`): a local vision-language model (Qwen3-VL 2B, 4 GB of GPU memory) describes
+every 3 s of a render as a short clip (12 frames at 4 fps, 448 px wide, 295 tokens) in one sentence. Single frames
+every 2 s took 4.7 s each in eager attention and missed the moments: the jump off the yacht's roof at 79.3 s read
+"a man is standing on the top of a boat" at 78 and "a man is swimming" at 80. Clips of 3 s with SDPA attention
+take 0.5 s each in batches of 6 (a 3-minute clip in 76 s, 25 min of footage in ~10 min) and describe the action:
+"a man is jumping into the water from a boat" at 77.8 and 80.6 s. The boy's dance at 101-102 s it did not see
+("people watching a dolphin swim by": there was no dolphin), and a question that listed the actions to choose from
+primed it: "jumping into the water" in 21 of 55 chunks of a clip with one jump. Asked as a careful observer to name
+only an action it sees happen, it said so in 9, the jump itself among them (92-95 s), and "standing, swimming,
+walking" for the rest. So a caption is a first answer, found by the words' stems (`--search`, `--must cap:TEXT`,
+the timeline's caption column and its FTS5 table), and the frame sheet of the stretch found is the proof.
+`review.py` asks the same model about the start, middle and end of every shot of a finished edit: a sentence on
+what it shows, then three questions with one-word answers (the subject visible or hidden, action or nothing,
+pleasant or dull). Asked instead for the shot's problems from a menu of seven, the 2B model copied the whole menu
+for 17 of 18 shots of one edit; asked one question at a time it flagged none of the 18 (people jumping off a yacht
+on a sunny day: fair), in 60 s. Whether it catches a man just standing there or a dull landing (the owner's own
+complaints on earlier jobs) is to be seen on such an edit. montage.py's `qc` prints the review's WARN lines.
 
 ## People and the pilot
 
@@ -501,6 +549,7 @@ cut, and two hits before that cut falling on level flight.
   anyway (screenshots of its main characters). On a minute of an FPV drone chasing children warming up on a
   tennis court the strongest "beats" were running steps and bodies cut by the frame's edge: nothing to cut on.
   Worth trying on footage of accented moves towards a steadier camera (a serve, a jump), on tracks the job has.
-- Sound bites: the footage's own laugh or shout under the music (the music ducked for 1-2 s), at the moments
-  `sounds.py` hears. Without it a `hear:` piece shows only the picture of the moment, and that can be snow under
-  the skis.
+- Sound bites the job names in words (`bites = ["laughter"]`): CLAP hears the snow under the skis as water
+  splashing; a job could say what its sounds are, as `beauty` says what its views are.
+- Captions by a bigger model when the GPU allows (Qwen3-VL 4B or 8B): the 2B one saw a dolphin on a Russian river
+  and called a boy's dance jumping.

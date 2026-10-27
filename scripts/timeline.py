@@ -15,9 +15,13 @@ Tables:
           + up) from the GPS (NULL without a fix); rot (visible camera rotation, deg/s), flow, parallax (resid90),
           bright, sharp from analyze.py; people (count), people_area (the biggest, share of the frame), facing,
           waving; one column per main character (people.py who / subject: their area, 0 when not in view); aes and
-          scenic (beauty.py); activity (the likeliest of places.ACTIVITIES, or 'none') and activity_p
+          scenic (beauty.py); activity (the likeliest of places.ACTIVITIES, or 'none') and activity_p; caption
+          (captions.py: what the model said of the 3 s chunk this moment falls in, NULL without captions)
   people  one row per person row of people.py detect: clip, t, frame, track (people.py track, else -1), x, y, w,
           h (centre and size, shares of the frame), area, facing, waving, name (main character or NULL)
+  captions  one row per captioned chunk: clip, t0, t1, text; captions_fts (FTS5) searches the words:
+          SELECT clip, t0, text FROM captions_fts JOIN captions ON captions.rowid = captions_fts.rowid
+          WHERE captions_fts MATCH 'jump*'
 """
 import argparse
 import glob
@@ -82,10 +86,17 @@ def build(job_dir, proxy, cache, clip_cache):
                'fps REAL, gps REAL, lat REAL, lon REAL, alt_min REAL, alt_max REAL, speed_p50 REAL)')
     cols = ['clip TEXT', 't REAL', 'frame INTEGER', 'speed REAL', 'alt REAL', 'climb REAL', 'rot REAL', 'flow REAL',
             'parallax REAL', 'bright REAL', 'sharp REAL', 'people INTEGER', 'people_area REAL', 'facing INTEGER',
-            'waving INTEGER', 'aes REAL', 'scenic REAL', 'activity TEXT', 'activity_p REAL'] + [f'"{n}" REAL' for n in names]
+            'waving INTEGER', 'aes REAL', 'scenic REAL', 'activity TEXT', 'activity_p REAL', 'caption TEXT'] + \
+        [f'"{n}" REAL' for n in names]
     db.execute(f'CREATE TABLE t ({", ".join(cols)})')
     db.execute('CREATE TABLE people (clip TEXT, t REAL, frame INTEGER, track INTEGER, x REAL, y REAL, w REAL, h REAL, '
                'area REAL, facing INTEGER, waving INTEGER, name TEXT)')
+    db.execute('CREATE TABLE captions (clip TEXT, t0 REAL, t1 REAL, text TEXT)')
+    try:                                                         # word search: SELECT ... FROM captions_fts WHERE
+        db.execute('CREATE VIRTUAL TABLE captions_fts USING fts5(clip, text, content=captions)')   # captions_fts MATCH 'jump*'
+        fts = True
+    except sqlite3.OperationalError:
+        fts = False
     for src, r in pairs:
         clip = os.path.splitext(os.path.basename(src))[0]
         base = os.path.splitext(r)[0]
@@ -157,6 +168,13 @@ def build(job_dir, proxy, cache, clip_cache):
             fr, lab, p = acts[r]
             k = np.clip(np.searchsorted(fr, grid), 0, len(fr) - 1)
             row['activity'], row['activity_p'] = lab[k], p[k]
+        if os.path.exists(base + '_captions.npz'):              # captions.py: the chunk each half second falls in
+            z = np.load(base + '_captions.npz', allow_pickle=False)
+            cf, ct, chunk = z['frame'], z['text'], float(z['chunk_s'])
+            k = np.clip(np.searchsorted(cf, grid, side='right') - 1, 0, len(cf) - 1)
+            row['caption'] = np.where(grid < cf[k] + chunk * fps, ct[k], None)
+            db.executemany('INSERT INTO captions VALUES (?,?,?,?)',
+                           [(clip, round(float(f / fps), 2), round(float(f / fps + chunk), 2), str(t)) for f, t in zip(cf, ct)])
         keys = [c.split()[0].strip('"') for c in cols]
         data = []
         for i in range(len(grid)):
@@ -177,12 +195,15 @@ def build(job_dir, proxy, cache, clip_cache):
                     sp50))
     db.execute('CREATE INDEX t_clip ON t (clip, t)')
     db.execute('CREATE INDEX people_clip ON people (clip, t)')
+    if fts:
+        db.execute("INSERT INTO captions_fts(captions_fts) VALUES ('rebuild')")
     db.commit()
     nt = db.execute('SELECT COUNT(*) FROM t').fetchone()[0]
     npl = db.execute('SELECT COUNT(*) FROM people').fetchone()[0]
+    ncap = db.execute('SELECT COUNT(*) FROM captions').fetchone()[0]
     db.close()
     os.replace(tmp, dst)
-    print(f'timeline: {len(pairs)} clips, {nt} half seconds, {npl} people rows, main characters: '
+    print(f'timeline: {len(pairs)} clips, {nt} half seconds, {npl} people rows, {ncap} captions, main characters: '
           f'{", ".join(names) or "none"} -> {dst}')
 
 

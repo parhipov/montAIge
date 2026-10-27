@@ -103,6 +103,8 @@ camera = "carried"                                # in a hand or on a helmet, no
                                                   # "auto": per clip by its accelerometer (camera.py, GoPro)
 lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log footage only
 objects = true                                    # vehicles and animals (objects.py)
+sounds = true                                     # the clips' own sound (hear: pieces, --bites 2 on every edit)
+captions = true                                   # the footage in words every 3 s (cap: pieces, review in qc)
 args = ["--people", "4"]                          # edit.py options of every edit, before each edit's own
 
 [[edit]]
@@ -156,10 +158,25 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   evening, sunset); edit.py and qc.py count the scene cuts that step back in time. Landings are marked and kept
   for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
-  B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`); a piece longer than its phrase plays
-  faster, up to 1.7x. The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
+  B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`), or `cap:TEXT` (what the captions say, job
+  `captions = true`: "cap:jumping into the water"); a piece longer than its phrase plays faster, up to 1.7x.
+  `@0.5` after a piece plays it at that speed (`CLIP:SEC@0.5`: true slow motion from 50 fps; one or two per
+  edit, no more). The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
   phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
   track's last hit, the music after it as the ending.
+- Craft (use them on new jobs; old jobs keep their numbers): `--build` (the phrase before a drop cut shorter and
+  shorter, a long shot on the drop), `--sizes 2` (shot sizes alternate in a people edit), `--roles 3` (an
+  establishing first shot, a closing last shot: waving, receding, a wide view, the landing), `--dissolve 0.8`
+  (cross-dissolves into scenes on calm music; never onto a hit or into a hero), `--bites 2` (the footage's own
+  sound under the music at a laugh, a shout, a splash; montage.py adds it with `sounds = true`; a `hear:` piece
+  always gets its sound). edit.py prints what each did: shot sizes in a row, the opening and closing scores,
+  the dissolves, the bites.
+- Seeing the footage in words: job `captions = true` runs `captions.py` (a local vision-language model, 3 s
+  chunks, ~0.5 s each) in `features` and `review.py` in `qc` (the model's line per shot of an edit, WARN on
+  nothing happening / blurred / dull view / the subject cut off: read the line, then `edl_edit.py --replace K`).
+  `captions.py --search "words"` and the timeline's `caption` column answer "where does he dance" without
+  frame sheets; the model is small (2B), so a stretch found is a first answer, the sheet of that stretch the
+  proof.
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
   clip's colour matched to that clip's) (kept in the EDL for `final.py`).
 - `--plan-only`, `--debug`, `--height`, `--fps`, `--brief` (no footage table: montage.py prints it for the first
@@ -175,8 +192,11 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
 - `timeline.py out/<job> --sql "SELECT ..."`: every feature in one SQLite table, a row per clip per 0.5 s (speed,
-  altitude, rotation, parallax, people and each main character, beauty, activity) and a row per person: questions
-  across features in one query instead of a one-off script. montage.py rebuilds it after `features`.
+  altitude, rotation, parallax, people and each main character, beauty, activity, the caption of that moment) and
+  a row per person: questions across features in one query instead of a one-off script. montage.py rebuilds it
+  after `features`.
+- `captions.py RENDER [...]` / `--search "words"`: the footage in words every 3 s (Qwen3-VL 2B in `models/vlm`),
+  stretches whose captions say the words; `review.py EDL`: the model's line per shot of an edit.
 - `camera.py CLIP|--list FILE`: flown or carried, from a GoPro's accelerometer.
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.

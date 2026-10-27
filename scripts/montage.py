@@ -21,7 +21,10 @@ paths in it); the job's name is its folder (or `name = ...`):
     objects = false                          # animals, vehicles (objects.py)
     places = true                            # CLIP frame embeddings for find:TEXT pieces (default true)
     sounds = false                           # CLAP of the clips' sound for hear:TEXT pieces (sounds.py; a carried
-                                             # camera hears people, a drone its propellers)
+                                             # camera hears people, a drone its propellers); edits get --bites 2
+    captions = false                         # every 3 s of each render in words by a local vision-language model
+                                             # (captions.py: cap:TEXT pieces, the timeline's caption column) and
+                                             # the model's review of every shot in `qc` (review.py)
     beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
     plain = ["snow up close"]                # what fills this footage without being a view (beauty.py --plain)
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py; square
@@ -318,6 +321,8 @@ def features(job, out, proxy):
         run([os.path.join(HERE, 'beauty.py')] + renders + [x for t in job['beauty'] for x in ('--text', t)] +
             [x for t in job.get('plain', []) for x in ('--plain', t)] +
             ['--clip-cache', os.path.join(MODELS, 'clip'), '--sheet', os.path.join(out, 'beauty_check.jpg')], log)
+    if job.get('captions', False):                               # every 3 s in words (captions.py; cap:TEXT pieces)
+        run([os.path.join(HERE, 'captions.py')] + renders, log)
     run([os.path.join(HERE, 'timeline.py'), out, '--proxy-dir', proxy, '--clip-cache', os.path.join(MODELS, 'clip')],
         log)                                                     # one table of it all: out/<job>/timeline.sqlite
     print(f'features: done (log {log}); check {os.path.join(out, "pilot_check.jpg")} and passes_check.jpg once')
@@ -469,6 +474,8 @@ def edits(job, job_path, out, proxy, cache, plan_only=False):
                 cmd += ['--bpm', e['bpm']]
             if job.get('lut'):
                 cmd += ['--lut', job['lut'], '--grade', 'auto']
+            if job.get('sounds'):                                # the clips' own sound under the music at its moments
+                cmd += ['--bites', 2]
             if e.get('series'):
                 for prev in series:
                     cmd += ['--avoid', prev]
@@ -500,6 +507,10 @@ def qc(job, out):
                                text=True)
             open(os.path.join(out, name, name + '_cuts.txt'), 'w', encoding='utf-8').write(r.stdout + r.stderr)
             print(f'    {(r.stdout.strip().splitlines() or ["cut sheet failed, see _cuts.txt"])[-1]}')
+            if job.get('captions', False):                       # the model's look at every shot (review.py)
+                r = subprocess.run([sys.executable, os.path.join(HERE, 'review.py'), edl], capture_output=True, text=True)
+                lines = [x for x in r.stdout.splitlines() if x.startswith(('WARN', 'review:'))]
+                print(''.join(f'    {x}\n' for x in lines) or f'    review failed: {r.stderr.strip().splitlines()[-1:]}')
 
 
 def final(job, out, names, size):

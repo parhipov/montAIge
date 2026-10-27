@@ -30,16 +30,33 @@ ALTERNATIVES = ['wind blowing into a microphone', 'skis scraping on snow', 'a ma
 PIECE_S = 3.0           # a sound found is shown as a piece this long around it
 
 
+TEXT_CACHE = os.path.join(paths.MODELS, 'clap', 'texts.npz')     # text embeddings computed so far
+
+
+class Lazy:
+    """The CLAP model (model, processor, device), loaded the first time it is unpacked: a script whose sound
+    embeddings are cached and whose texts are in TEXT_CACHE never imports torch (edit.py --bites)."""
+    def __init__(self, cache=None):
+        self.cache, self.parts = cache or os.path.join(paths.MODELS, 'clap'), None
+
+    def load(self):
+        if self.parts is None:
+            import torch  # noqa: F401
+            from transformers import ClapModel, ClapProcessor
+            import gpu
+            dev = gpu.device()
+            m = ClapModel.from_pretrained(NAME, cache_dir=self.cache).to(dev).eval()
+            if dev != 'cpu':
+                m = m.half()
+            self.parts = (m, ClapProcessor.from_pretrained(NAME, cache_dir=self.cache), dev)
+        return self.parts
+
+    def __iter__(self):
+        return iter(self.load())
+
+
 def model_of(cache=None):
-    import torch
-    from transformers import ClapModel, ClapProcessor
-    import gpu
-    dev = gpu.device()
-    cache = cache or os.path.join(paths.MODELS, 'clap')
-    m = ClapModel.from_pretrained(NAME, cache_dir=cache).to(dev).eval()
-    if dev != 'cpu':
-        m = m.half()
-    return m, ClapProcessor.from_pretrained(NAME, cache_dir=cache), dev
+    return Lazy(cache)
 
 
 def unit(out):
@@ -49,10 +66,23 @@ def unit(out):
 
 
 def text_emb(mdl, texts):
-    import torch
-    model, proc, dev = mdl
-    with torch.no_grad():
-        return unit(model.get_text_features(**proc(text=texts, return_tensors='pt', padding=True).to(dev))).cpu().numpy()
+    """Unit embeddings of the texts, kept in TEXT_CACHE: only texts not seen before go through the model."""
+    known = {}
+    if os.path.exists(TEXT_CACHE):
+        with np.load(TEXT_CACHE) as z:
+            known = dict(zip(z['text'].tolist(), z['emb']))
+    new = [t for t in dict.fromkeys(texts) if t not in known]
+    if new:
+        import torch
+        model, proc, dev = mdl
+        with torch.no_grad():
+            e = unit(model.get_text_features(**proc(text=new, return_tensors='pt', padding=True).to(dev))).cpu().numpy()
+        known.update(zip(new, e.astype(np.float32)))
+        os.makedirs(os.path.dirname(TEXT_CACHE), exist_ok=True)
+        np.savez(TEXT_CACHE + '.tmp.npz', text=np.array(list(known), dtype=str),
+                 emb=np.stack(list(known.values())).astype(np.float32))
+        os.replace(TEXT_CACHE + '.tmp.npz', TEXT_CACHE)
+    return np.stack([known[t] for t in texts]).astype(np.float32)
 
 
 def audio(path):

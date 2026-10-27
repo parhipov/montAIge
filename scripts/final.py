@@ -230,10 +230,11 @@ def main():
 
     # 1. trim ranges per original, merged, rendered by Gyroflow
     by = {}
+    d_s = max(DISSOLVE_S, float(e.get('dissolve') or 0.0))      # the margin a dissolve's pre-roll and tail need
     for k, x in enumerate(shots):
         f = flights[x['flight']]
-        lo = x['anchors'][0] - MARGIN_S * f['fps'] - (DISSOLVE_S * f['fps'])
-        hi = x['anchors'][-1] + MARGIN_S * f['fps'] + (DISSOLVE_S * f['fps'])
+        lo = x['anchors'][0] - MARGIN_S * f['fps'] - (d_s * f['fps'])
+        hi = x['anchors'][-1] + MARGIN_S * f['fps'] + (d_s * f['fps'])
         by.setdefault(x['flight'], []).append([max(lo, 0.0), hi, [k]])
     ranges, owner, owner_lo = {}, {}, {}
     for fi, rr in by.items():
@@ -310,17 +311,7 @@ def main():
             pass
     au = oc.add_stream('aac', rate=48000)
     au.layout, au.bit_rate = 'stereo', 192000
-    with av.open(e['music']) as ic:
-        rs = av.AudioResampler(format='fltp', layout='stereo', rate=48000)
-        for fr in ic.decode(audio=0):
-            for o in rs.resample(fr):
-                for p in au.encode(o):
-                    oc.mux(p)
-        for o in rs.resample(None):
-            for p in au.encode(o):
-                oc.mux(p)
-    for p in au.encode(None):
-        oc.mux(p)
+    bf.music_audio(oc, au, e['music'], e.get('bites') or ())  # the music, with the clips' own sound at the bites
 
     readers = {}
     grade = GpuGrade(None if a.no_grade else e.get('lut'))
@@ -355,6 +346,13 @@ def main():
     # a chapter is a day, or a session of one ('2022-08-06 19:23', edit.py --sessions): a caption per day
     dates = [(x['day'] or '')[:10] for x in shots]
     day_starts = [k for k in range(len(shots)) if k == 0 or dates[k] != dates[k - 1]]
+    # a dissolve across a change of day (DISSOLVE_S), and into the scenes the EDL marks (edit.py --dissolve S)
+    dlen = {k: DISSOLVE_S for k in day_starts if k > 0}
+    k_shot = 0
+    for s in e['scenes']:
+        if s.get('dissolve_in') and k_shot > 0:
+            dlen[k_shot] = max(dlen.get(k_shot, 0.0), float(e.get('dissolve') or DISSOLVE_S))
+        k_shot += len(s['shots'])
     caps = {}
     if a.captions:
         for k in day_starts:
@@ -368,12 +366,12 @@ def main():
         while k + 1 < len(shots) and t >= shots[k + 1]['t0']:
             k += 1
         img = frame_of(k, t)
-        # dissolve across a change of day: centred on the cut
+        # a dissolve centred on the cut: across a change of day, or into a scene the plan marks
         for kk in (k, k + 1):
-            if 0 < kk < len(shots) and kk in day_starts:
-                tc = shots[kk]['t0']
-                if abs(t - tc) < DISSOLVE_S / 2:
-                    w_in = (t - tc) / DISSOLVE_S + 0.5
+            if 0 < kk < len(shots) and kk in dlen:
+                tc, D = shots[kk]['t0'], dlen[kk]
+                if abs(t - tc) < D / 2:
+                    w_in = (t - tc) / D + 0.5
                     other = frame_of(kk - 1 if kk == k else kk, t).astype(np.float32)
                     img = img.astype(np.float32) * (w_in if kk == k else 1 - w_in) + other * (1 - w_in if kk == k else w_in)
         for kc, (rgb, al) in caps.items():
