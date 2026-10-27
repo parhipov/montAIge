@@ -198,6 +198,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   after `features`.
 - `captions.py RENDER [...]` / `--search "words"`: the footage in words every 3 s (Qwen3-VL 2B in `models/vlm`),
   stretches whose captions say the words; `review.py EDL`: the model's line per shot of an edit.
+- `smiles.py RENDER [...] [--sheet OUT.jpg]`: smiles at the camera, few and right (the same model asked about the
+  heads of people facing the camera, sharp and big enough, a yes confirmed by the next); prints CLIP:START-END for
+  `--must`. Not in montage.py: for a shoot that asks for faces (a promo's ending, a party).
 - `camera.py CLIP|--list FILE`: flown or carried, from a GoPro's accelerometer.
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.

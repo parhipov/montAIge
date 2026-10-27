@@ -201,7 +201,8 @@ renders (same frame count as the original), telemetry from the original.
 - **Two aspects in one edit** (a 4:3 drone, 16:9 hand cameras): the preview took the first clip's aspect and
   stretched the others, and the look thumbnails (9 rows, 12 or 16 columns) could not be compared. Every clip is
   now scaled to cover the frame and cut in its centre (`--width` sets the preview's aspect), and the thumbnails
-  compare on their 4:3 centre. `final.py` still assumes one aspect.
+  compare on their 4:3 centre. `final.py` renders each piece at its clip's own aspect covering the final (a 16:9
+  hand camera at 5120x2880 for a 3840x2880 final) and cuts the centre, as the preview does.
 - **Look-alikes:** 12×9 Lab thumbnails, RMS distance; σ = 0.56 × the median distance between random frames
   (22 on a construction site, 15.5 in a grey hall; a fixed 22 counted 71 pairs alike in the hall, the scaled
   one 9). Thumbnails do not see one subject from different angles; whole-frame CLIP does not either (random
@@ -380,6 +381,17 @@ pleasant or dull). Asked instead for the shot's problems from a menu of seven, t
 for 17 of 18 shots of one edit; asked one question at a time it flagged none of the 18 (people jumping off a yacht
 on a sunny day: fair), in 60 s. Whether it catches a man just standing there or a dull landing (the owner's own
 complaints on earlier jobs) is to be seen on such an edit. montage.py's `qc` prints the review's WARN lines.
+
+**Smiles** (`smiles.py`): the same model, asked "Is this person smiling?" about candidate heads only. On whole
+640 px frames of a boxing gym (people from 2 % of the frame, 3713 candidates) it said yes to 328, nearly all far
+away (faces of 10-20 px: a guess). The candidates are now people facing the camera from 6 % of the frame, the
+model sees a square around the head (nose, eyes, ears; at least the shoulders) scaled to 336 px: 2522 candidates,
+400 yes in 129 s, and the false ones were of three kinds, read off a sheet of 40 across the sharpness range:
+smeared or covered heads (a GoPro inside the ring, a whip of the camera: Laplacian variance at 96 px 16-230 against
+240-3100 for faces), heads of 32-36 px, and single yeses with no other within 1.6 s. Not asking heads under 48 px
+or under 250, and counting a yes only with another: 218 smiles in 40 stretches in 91 s, 28-29 of 32 on the sheet
+plainly smiling (the doubtful: a smeared face, one looking down, a faint smile, a dark frame), the ending's teens
+at the ropes among them. Few and right on purpose: the owner would rather miss smiles than be sent wrong ones.
 
 ## People and the pilot
 

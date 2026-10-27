@@ -173,6 +173,16 @@ class Reader:
         return (a.astype(np.float32) * (1.0 - w) + b.astype(np.float32) * w + 0.5).astype(a.dtype)
 
 
+def cover_size(W, H, aspect):
+    """The size of a picture of this aspect that covers W x H (the preview's crop, edit.py render): a 16:9 hand
+    camera in a 4:3 final is cut from a picture H high, never stretched to W x H."""
+    if abs(aspect - W / H) < 0.01:
+        return W, H
+    if aspect > W / H:
+        return int(round(H * aspect / 2)) * 2, H
+    return W, int(round(W / aspect / 2)) * 2
+
+
 def piece_size(W, H, crop_bottom, crop_top, zoom=1.0):
     """Render size of a piece and the window to cut, so the cut window is W x H without scaling: the band
     between the bottom and top crops, then its centre 1/zoom (the EDL's zoom, as in the preview)."""
@@ -265,14 +275,20 @@ def main():
         return os.path.join(pieces_dir, f'{stem(fi)}_stabilized-{j + 1:03d}.mp4')
     is_dji = lambda c: os.path.basename(c).upper().startswith('DJI_')
     zoom = a.zoom if a.zoom is not None else e.get('zoom') or 1.0
-    sizes = {False: piece_size(a.width, a.height, 0.0, 0.0, zoom),
-             True: piece_size(a.width, a.height, a.crop_bottom, a.crop_top, zoom)}
-    for dji in (True, False):
-        todo = {c: r for c, r in ranges.items() if is_dji(c) == dji and not bf.stabilized_before(c) and
+    def size_of(c):
+        """(Wp, Hp, (x0, y0)): the piece's render size and where the final's W x H window sits in it."""
+        with av.open(c) as cc:
+            ctx = cc.streams.video[0].codec_context
+            Wc, Hc = cover_size(a.width, a.height, ctx.width / ctx.height)
+        cb, ct = (a.crop_bottom, a.crop_top) if is_dji(c) else (0.0, 0.0)
+        Wp, Hp, (x0, y0) = piece_size(Wc, Hc, cb, ct, zoom)
+        return Wp, Hp, (x0 + (Wc - a.width) // 2, y0 + (Hc - a.height) // 2)
+    sizes = {c: size_of(c) for c in ranges}
+    for Wp, Hp in sorted({s[:2] for c, s in sizes.items() if not bf.stabilized_before(c)}):
+        todo = {c: r for c, r in ranges.items() if sizes[c][:2] == (Wp, Hp) and not bf.stabilized_before(c) and
                 not all(os.path.exists(piece(fi, j)) for fi in flights if flights[fi]['original'] == c for j in range(len(r)))}
         if not todo:
             continue
-        Wp, Hp, _ = sizes[dji]
         with open(rj + '.todo', 'w', encoding='utf-8') as fh:
             json.dump(todo, fh, ensure_ascii=False)
         print(f'gyroflow: {sum(len(r) for r in todo.values())} pieces from {len(todo)} clips at {Wp}x{Hp}', flush=True)
@@ -321,7 +337,7 @@ def main():
         x = shots[k]
         fi, j, _ = owner[k]
         if (fi, j) not in readers:
-            Wp, Hp, crop = sizes[is_dji(flights[fi]['original'])]
+            Wp, Hp, crop = sizes[flights[fi]['original']]
             if bf.stabilized_before(flights[fi]['original']):
                 readers[(fi, j)] = Reader(piece(fi, j), W, H, crop, scale=(Wp, Hp), first=int(owner_lo[(fi, j)]))
             else:

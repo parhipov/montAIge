@@ -543,6 +543,8 @@ def qc(job, out):
 
 def final(job, out, names, size):
     w, h = (int(v) for v in size.lower().split('x'))
+    if job.get('gyroflow'):                                      # final.py renders its pieces through Gyroflow too
+        os.environ['GYROFLOW'] = job['gyroflow']
     for name in names:
         edl = os.path.join(out, name, name + '_edl.json')
         run([os.path.join(HERE, 'final.py'), edl, os.path.join(out, name, f'{name}_{w}x{h}.mp4'),

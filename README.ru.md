@@ -158,7 +158,7 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 ```
 
 Требования: видеокарта NVIDIA (проверено на RTX 3050, 8 ГБ), Python 3.11+, PyTorch с CUDA, ultralytics,
-transformers, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu нужен только
+transformers и accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu нужен только
 для сравнения лиц. Проверено на Windows 10 с материалом DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 и GoPro.
 
 Модели, LUT и музыки в репозитории нет: всё, что нужно заданию, Claude скачивает в `models/` рядом со

@@ -156,7 +156,7 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 ```
 
 Requirements: an NVIDIA GPU (tested on an RTX 3050, 8 GB), Python 3.11+, PyTorch with CUDA, ultralytics,
-transformers, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu for face
+transformers and accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu for face
 matching only. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage.
 
 Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
