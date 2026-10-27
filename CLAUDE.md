@@ -47,7 +47,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   the owner stabilized themselves are their picks (`--picked`).
 - An archive of several places: one edit per place (`places.py locations`, the GPS), each with its `clips`.
 - Variants differ by idea (track, pacing, opening); spread the best moments across them.
-- Split DJI recordings: ask the owner before joining (`montage.py --join` renames the parts).
+- Split DJI recordings: ask the owner before joining when they are there (`montage.py --join` renames the
+  parts); overnight, join.
 - Propellers or a lens guard in view after stabilization are framing: Gyroflow's zoom, or `--zoom`. Horizon
   tilt is not a fault.
 - Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo only (`music_check.py`), the
@@ -57,7 +58,13 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
-- The owner watches as it goes: keep steps short, say what is running, take comments in between.
+- When the owner is there: keep steps short, say what is running, take comments in between. Left for the night
+  ("do it yourself, I'll watch in the morning"), nothing waits for an answer: the task text is the whole brief,
+  every choice is yours (the track, from the catalogue by the footage and by what the owner liked before; the
+  length, about a minute; the subject, from the task; `camera = "auto"` when unsure), two or three previews with
+  different ideas go to `out/<job>/previews/` as numbered files, and whatever you would have asked goes into
+  `out/<job>/example.md` under "Questions", to be answered in the morning. Split DJI recordings are joined then
+  (the parts stay, renamed) and said so in the morning.
 - A new job in a new session: every request re-reads the whole conversation, and a job done late in a long
   session cost 3.5 times as many tokens as it would on its own. What enters the context is paid for on every
   later step: numbers first (poses, CLIP, `timeline.py`), then one picture to confirm; no progress output or long
