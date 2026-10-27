@@ -239,8 +239,12 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 ## After a job
 
 Everything general that will be useful again goes into the repository: rules into `scripts/`, measurements and
-methods into `docs/notes.md`, new options into this file and the READMEs. Session data does not, unless the owner
-says so: the job's write-up (footage, task, edits with their numbers, the owner's comments, what it taught) stays
-in `out/<job>/example.md` (not in git), and notes give the numbers without linking a job. Keep the job's
+methods into `docs/notes.md`, new options into this file and the READMEs. The repository is every copy of the
+project: a line written there is read by every later job on every machine and paid for in context each time,
+so weigh a change before making it: only what a future job would act on (a rule, a threshold, a measured
+number that transfers), never a job's story, how its pipeline was wired or how long its runs took. Session data
+does not go in, unless the owner says so: the job's write-up (footage, task, edits with their numbers, the
+owner's comments, what it taught) stays in `out/<job>/example.md` (not in git), and notes give the numbers
+without linking a job. Keep the job's
 `scripts/` snapshot in `out/<job>/`. Docs and code comments in English; `README.ru.md` is the Russian twin of
 `README.md`.
