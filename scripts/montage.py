@@ -49,7 +49,9 @@ paths in it); the job's name is its folder (or `name = ...`):
 Steps:
   scan      the clips: originals only (not renders, not goggle recordings, not the _parts of a joined
             recording), and `_stabilized` clips whose original is not there; not a clip Gyroflow gave no picture of
-            (a fraction of a second: its render is kept as <clip>_stabilized.failed). Split DJI recordings are
+            (a fraction of a second: its render is kept as <clip>_stabilized.failed). Every video file left out
+            is listed with why and what would take it in ("not taken:", WARN where it may be footage: no motion
+            data and not an ffmpeg export, or not mp4). Split DJI recordings are
             listed and the job stops: they are joined (dji_join.py)
             only with --join, after the owner of the footage said yes. -> out/<name>/originals.txt
   render    whole-clip Gyroflow renders 640 px wide, several at once (gf_render.py); GoPro and .gcsv motion through
@@ -177,6 +179,38 @@ def has_gcsv(path):
 
 
 # ------------------------------------------------------------------------------------------- scan
+OTHER_VIDEO = ('.mov', '.m4v', '.mts', '.m2ts', '.avi', '.mkv', '.insv', '.360')   # not LRV/LRF: a clip's preview
+
+
+def encoder(path):
+    """The container's encoder tag: `Lavf...` is ffmpeg (Gyroflow, an editor), so an export; a camera writes its
+    own (`DJI O4P`) or none (GoPro, RunCam)."""
+    try:
+        with av.open(path) as c:
+            return c.metadata.get('encoder', '')
+    except Exception:
+        return ''
+
+
+def not_taken(bare, other, exports, goggles):
+    """The video files the scan left out, a line per reason with what would take them in: nothing is dropped
+    unseen. WARN where it may be footage (a camera without a gyro, a phone's .MOV)."""
+    made = [f for f in bare if encoder(f).startswith('Lavf')]
+    cams = [f for f in bare if f not in made]
+    for warn, fs, why in (
+            (True, cams, 'no motion data and not made by ffmpeg: footage of a camera without a gyro? renamed to '
+                         '<name>_stabilized.mp4 it comes in, motion from the picture'),
+            (True, other, 'not mp4 (a phone\'s .MOV, a camcorder\'s .MTS): converted to mp4 it can come in'),
+            (False, made, 'no motion data, made by ffmpeg (encoder Lavf): an export or a finished edit; '
+                          'exports.py finds its pieces in the originals'),
+            (False, exports, 'the owner\'s exports beside their originals: picks (--picked, exports.py)'),
+            (False, goggles, 'goggle recordings (DJIG*): the goggles\' view, no gyro')):
+        if fs:
+            names = sorted(os.path.basename(f) for f in fs)
+            print(f'  {"WARN " if warn else ""}not taken: {len(fs)} {why}: '
+                  + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else ''))
+
+
 def scan(job, out, join, proxy):
     import dji_join
     roots = [p for p in job['footage'] if os.path.isdir(p)]
@@ -194,18 +228,20 @@ def scan(job, out, join, proxy):
     files = []
     for p in job['footage']:
         files += [p] if os.path.isfile(p) else [os.path.join(d, n) for d, _, ns in os.walk(p) for n in ns]
-    files = [f for f in files if f.lower().endswith('.mp4') and not os.path.basename(f).startswith(('_', '.'))]
+    files = [f for f in files if not os.path.basename(f).startswith(('_', '.'))]
+    other = [f for f in files if f.lower().endswith(OTHER_VIDEO)]
+    files = [f for f in files if f.lower().endswith('.mp4')]
     stems = {os.path.splitext(os.path.basename(f))[0].lower() for f in files}
-    clips, elsewhere = [], []
+    clips, elsewhere, exports, goggles, bare = [], [], [], [], []
     for f in files:
         n = os.path.basename(f)
         if n.upper().startswith('DJIG'):                         # goggle recordings carry no gyro
+            goggles.append(f)
             continue
         if '_stabilized' in n.lower():
             # an export of an original that is here is the owner's old export (exports.py); without its original
             # it is the footage itself, already stabilized: picture as it is, motion from it (vis_motion.py)
-            if n.lower().split('_stabilized')[0] not in stems:
-                elsewhere.append(f)
+            (exports if n.lower().split('_stabilized')[0] in stems else elsewhere).append(f)
             continue
         clips.append(f)
     keep = []
@@ -215,10 +251,11 @@ def scan(job, out, join, proxy):
         elif has_track(c, b'djmd') or has_track(c, b'gpmd') or has_gcsv(c):
             keep.append(c)
         else:
-            print(f'  skip {os.path.basename(c)}: no motion data (DJI djmd / GoPro gpmd / a .gcsv next to it)')
+            bare.append(c)
     for c in sorted(set(elsewhere)):
         print(f'  {os.path.basename(c)}: stabilized before, without its original: motion from the picture')
     keep += sorted(set(elsewhere))
+    not_taken(bare, other, exports, goggles)
     with open(os.path.join(out, 'originals.txt'), 'w', encoding='utf-8') as fh:
         fh.write('\n'.join(keep) + '\n')
     print(f'scan: {len(keep)} clips -> {os.path.join(out, "originals.txt")}')

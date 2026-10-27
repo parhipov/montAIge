@@ -53,6 +53,11 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   parts); overnight, join.
 - Propellers or a lens guard in view after stabilization are framing: Gyroflow's zoom, or `--zoom`. Horizon
   tilt is not a fault.
+- No gyro in a clip is not a stop: its camera motion comes from the picture (`vis_motion.py`). The scan takes
+  such a clip in under a `_stabilized` name (a bare mp4 beside originals is usually the owner's export of one,
+  `exports.py`); flown or carried is `camera.py`'s verdict (a GoPro's accelerometer, `camera = "auto"`) or the
+  job's `camera`. The scan lists every video it left out, with why (`not taken:`); a `WARN not taken` may be
+  footage (no motion data and not an ffmpeg export, or a .MOV): decide (rename, convert) and tell the owner.
 - Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo only (`music_check.py`), the
   catalogue BPM as `bpm`. Once the owner has liked a track, the next ones by how they sound
   (`music_like.py LIKED --not DISLIKED`), not by the catalogue's words. Kevin MacLeod, CC BY 4.0: credit when
@@ -213,7 +218,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `smiles.py RENDER [...] [--sheet OUT.jpg]`: smiles at the camera, few and right (the same model asked about the
   heads of people facing the camera, sharp and big enough, a yes confirmed by the next); prints CLIP:START-END for
   `--must`. Not in montage.py: for a shoot that asks for faces (a promo's ending, a party).
-- `camera.py CLIP|--list FILE`: flown or carried, from a GoPro's accelerometer.
+- `camera.py CLIP|--list FILE`: flown or carried, per clip, from a GoPro's accelerometer (`camera = "auto"` in
+  the job file); a clip without one (DJI, no gyro) gets no verdict and takes the job's `camera`.
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.
 - `music_like.py LIKED.mp3 [--not DISLIKED.mp3]`: catalogue tracks that sound like the liked one (CLAP's music
@@ -224,8 +230,11 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   frame), `--end-from K` (the ending takes over), `--put K.J CLIP:SEC` (a moment the owner names, in shot J of
   scene K at 1x), `--match CLIP` (the colour of the cameras matched). The music is never cut: that moves every
   later scene.
-- `vis_motion.py`: camera motion from the picture of a clip stabilized elsewhere (a `_stabilized` export
-  without its original: montage.py takes it in, scales it down with `proxy.py`, finals cut it directly).
+- `vis_motion.py`: camera motion from the picture, for a clip with no gyro to read: a `_stabilized` export
+  without its original, or a DJI file whose Gyroflow motion export does not move (an Osmo Action 3 with
+  RockSteady). montage.py takes it in, scales it down with `proxy.py` instead of rendering, reads its motion in
+  `features`, finals cut it directly. A clip with no motion track under any other name is left out by the scan:
+  give a phone or camera clip a `_stabilized` name to take it in.
 
 ## After a job
 

@@ -125,8 +125,9 @@ renders (same frame count as the original), telemetry from the original.
   among the alternatives, flying close over a roof and a chimney against the sky got in. The camera angle does
   not separate them (−8..+6° on most climbs). The way back to the ground closes an arc; "up 24 s, far 0.13"
   ranks how high it went. ([village](examples/village.md))
-- **Motion from the picture** (`vis_motion.py`), for clips stabilized elsewhere whose gyro is gone (an owner's
-  Gyroflow export without its original): corners tracked between consecutive frames of the proxy (Lucas-Kanade,
+- **Motion from the picture** (`vis_motion.py`), for clips with no gyro to read (an owner's Gyroflow export
+  without its original, a DJI file whose motion export does not move, a camera without a gyro taken in under a
+  `_stabilized` name): corners tracked between consecutive frames of the proxy (Lucas-Kanade,
   both ways), the camera rotation fitted by RANSAC on pairs of bearings, chained into an orientation per frame
   that edit.py takes like telemetry. Against the gyro of a GoPro clip rendered by our Gyroflow (`stab_quat`, the
   smoothed path the picture shows): correlation 0.99 / 0.95 / 0.99 on tilt / pan / roll, scale 1.03 / 0.98 /
@@ -524,6 +525,16 @@ for it once the information piled up.
 - Propellers or a lens guard in view are framing: Gyroflow's zoom, or `--zoom` (1.16 hid a guard's dark arcs
   and blue corners; a frame-edge darkness metric could not tell them from tree shadows).
 - DJI goggle recordings (`DJIG*.mp4`) carry no gyro and are skipped.
+- A clip with no motion data under its own name (no DJI or GoPro track, no `.gcsv`) is left out by the scan: a
+  bare mp4 beside originals is usually the owner's export of one (`exports.py`). Footage that is such a clip (a
+  phone, a camera with its own stabilization) is taken in under a `_stabilized` name: `proxy.py` scales it,
+  `vis_motion.py` reads its motion, finals cut it directly. Checked on one 57 s clip under both names: left out as
+  is, taken in as `_stabilized`; `vis_motion.py` on it ran at 20 frames/s.
+- The scan names every video it leaves out, a line per reason (`not taken:`). The container's encoder tag tells
+  an export from a camera: the owner's six named exports of one folder and Gyroflow's `_stabilized` files all
+  say `Lavf` (ffmpeg); DJI originals say `DJI O4`, `DJI O4P`, `DJI DEFAULT ENCODING`; GoPro and RunCam write none.
+  No motion data and not `Lavf` is a WARN (a camera without a gyro?), so is a video that is not mp4 (a phone's
+  .MOV); an export is listed without one.
 - A clip of a fraction of a second (a GoPro's 0.2 s false start) gets no motion export and a render with no
   video stream (752 bytes); every later step failed on it. The render step keeps such a render as
   `<clip>_stabilized.failed` and the scan leaves the clip out.
@@ -577,8 +588,9 @@ cut, and two hits before that cut falling on level flight.
 
 ## Ideas not done yet
 
-- Stabilization from the picture, for footage without motion data that was never stabilized (phone clips,
-  goggle recordings): `vis_motion.py` reads its rotation already (the shake too, which edit.py low-passes);
+- Stabilization from the picture, for footage without motion data that was never stabilized (phone clips taken
+  in under a `_stabilized` name, goggle recordings): `vis_motion.py` reads its rotation already (the shake too,
+  which edit.py low-passes);
   smoothing that rotation and turning each frame back would stabilize it. Checkable on the gyro clips.
 - An absolute horizon for motion from the picture (sky and ground, or a regression of the camera angle on the
   CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.

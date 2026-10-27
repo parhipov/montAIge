@@ -48,8 +48,9 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
 - Music: beat grid, bars, phrases and loudness of the track. The track is shortened by whole phrases to the
   requested length; cuts fall on beats, and a strong hit in the music gets a cut or a manoeuvre.
 - Footage analysis, on your machine:
-  - camera motion from the gyro track, if the camera records one (DJI, GoPro), or from the picture of a clip
-    stabilized elsewhere whose gyro is gone: turns, dives, climbs, flips, close passes, a piloting score;
+  - camera motion from the gyro track, if the camera records one (DJI, GoPro, a `.gcsv` log), or from the
+    picture when there is no gyro to read (a clip stabilized elsewhere, a camera without one): turns, dives,
+    climbs, flips, close passes, a piloting score;
   - people: who is in view, which of them is the pilot (FPV goggles or a radio), flying between someone's legs
     or over them, a main character described in words or shown by an example image;
   - places and activities by text query (CLIP), routes through several places, grouping clips by location;
@@ -157,7 +158,9 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 
 Requirements: an NVIDIA GPU (tested on an RTX 3050, 8 GB), Python 3.11+, PyTorch with CUDA, ultralytics,
 transformers and accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu for face
-matching only. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage.
+matching only. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage, and
+with clips with no usable gyro (an Osmo Action 3, exports stabilized elsewhere): their camera motion comes from
+the picture.
 
 Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
 `scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
@@ -174,7 +177,8 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `people.py` | poses, the pilot, close passes, tracks, a main character in words or by example (a screenshot found in the footage) |
 | `places.py` | places and activities by text, routes, locations |
 | `exports.py` | earlier exports matched to the originals |
-| `vis_motion.py` | camera motion from the picture, for clips stabilized elsewhere |
+| `vis_motion.py` | camera motion from the picture, for clips with no gyro to read (stabilized elsewhere, a camera without one) |
+| `camera.py` | flown or carried, per clip, from a GoPro's accelerometer |
 | `gps.py` | where a GoPro clip was shot, and how fast and which way up or down, from its GPS |
 | `timeline.py` | every feature in one SQLite table, a row per half second: questions across them in one query |
 | `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
@@ -191,8 +195,10 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 
 ## Not implemented yet
 
-- Stabilization from the picture: footage without motion data that was never stabilized (phone clips, goggle
-  recordings) is skipped. Its motion can be read from the picture already; the picture itself would stay shaky.
+- Stabilization from the picture: a clip without motion data is edited as it is, its camera motion read from the
+  picture (the scan takes it in under a `_stabilized` name, since a bare mp4 beside originals is usually an
+  export of one, and warns about any it left out); smoothing the picture itself is not done, a shaky phone clip
+  stays shaky.
 - Tracks without a constant tempo.
 
 ## Credits
