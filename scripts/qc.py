@@ -11,12 +11,15 @@ checked: after stabilization they must not be in view, and if they are, that is 
 setting, not something the edit can fix.
 """
 import argparse
+import datetime
 import json
 import os
 
 import av
 import cv2
 import numpy as np
+
+import pix
 
 
 def line(name, value, ok):
@@ -70,7 +73,15 @@ def main():
     days = [x['day'] for x in shots if x.get('day')]
     if days:
         back = sum(1 for p, q in zip(days, days[1:]) if q < p)
-        line('chronology', f'{len(set(days))} days, {back} steps back in time', back == 0)
+        # ... and within a day, scene by scene (edit.py --order asks for the order: day, evening, sunset)
+        rec = {g['idx']: g.get('recorded') for g in e['flights']}
+        ts = []
+        for s in e['scenes']:
+            r = rec.get(s['flight'])
+            ts.append((s.get('day'), datetime.datetime.fromisoformat(r).timestamp() + s['shots'][0]['src_t0'] if r else None))
+        within = sum(1 for (d, t), (d2, u) in zip(ts, ts[1:]) if d == d2 and t is not None and u is not None and u < t)
+        line('chronology', f'{len(set(days))} days, {back} steps back in time; within a day {within} of '
+             f'{len(ts) - 1} scene cuts step back', back == 0)
     mv = [x.get('move') for x in shots if x.get('move')]
     if mv:
         run = best = 1
@@ -128,7 +139,7 @@ def main():
     means, diffs = [], []
     prev = None
     for fr in c.decode(vs):
-        im = fr.to_ndarray(format='bgr24', width=96, height=54)
+        im = pix.ndarray(fr, format='bgr24', width=96, height=54)
         g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32)
         means.append(g.mean())
         diffs.append(np.abs(g - prev).mean() if prev is not None else 99.0)

@@ -16,6 +16,8 @@ import time
 import av
 import numpy as np
 
+import pix
+
 GROUPS = {
     'person': {0},
     'vehicle': {1, 2, 3, 5, 6, 7, 8},          # bicycle car motorcycle bus train truck boat
@@ -36,7 +38,7 @@ def detect(model, src, every, conf):
         i = int(round(float(fr.pts * st.time_base) * fps))
         if i % every == 0:
             frames.append(i)
-            imgs.append(fr.to_ndarray(format='bgr24'))
+            imgs.append(pix.ndarray(fr, format='bgr24'))
     c.close()
     H, W = imgs[0].shape[:2]
     rec = {f'{g}_{k}': np.zeros(len(imgs)) for g in GROUPS for k in ('n', 'area')}

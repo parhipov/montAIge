@@ -1,6 +1,6 @@
 """Image motion features and look thumbnails of small stabilized renders (any aspect).
 
-    python analyze.py RENDER.mp4 [...]   ->  <render>_flow.npz, <render>_look.npz next to each
+    python analyze.py RENDER.mp4 [...] [--workers N]   ->  <render>_flow.npz, <render>_look.npz next to each
 
 Flow features at half the frame rate (every 2nd frame), from 160-px-wide grey frames:
   flow      mean |optical flow| px per frame pair
@@ -10,7 +10,10 @@ Flow features at half the frame rate (every 2nd frame), from 160-px-wide grey fr
   bottom    mean |flow| in the lower quarter (ground rushing by)
   bright, sharp (Laplacian variance)
 Look: Lab thumbnail of every 5th frame, 12 cells high, width from the aspect.
+Clips are analysed --workers at a time (processes: the flow is single-threaded CPU work; default half the CPUs).
 """
+import argparse
+import multiprocessing
 import os
 import sys
 import time
@@ -19,12 +22,18 @@ import av
 import cv2
 import numpy as np
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import pix  # noqa: E402
+
 LOOK_STEP = 5
-for src in sys.argv[1:]:
+
+
+def analyze(src):
+    """The flow and look files of one render; returns the line to print."""
     base = os.path.splitext(src)[0]
     if os.path.exists(base + '_flow.npz') and os.path.exists(base + '_look.npz'):
-        print(os.path.basename(src), 'done before')
-        continue
+        return f'{os.path.basename(src)} done before'
     t0 = time.time()
     c = av.open(src)
     st = c.streams.video[0]
@@ -45,7 +54,7 @@ for src in sys.argv[1:]:
         n += 1
         if idx % 2 and idx % LOOK_STEP:
             continue
-        bgr = fr.to_ndarray(format='bgr24', width=gw, height=gh)
+        bgr = pix.ndarray(fr, format='bgr24', width=gw, height=gh)
         if idx % LOOK_STEP == 0:
             t = cv2.resize(bgr, (lw, 9), interpolation=cv2.INTER_AREA)
             look_fr.append(idx)
@@ -67,4 +76,28 @@ for src in sys.argv[1:]:
     cols = ('frame', 'flow', 'resid50', 'resid90', 'div', 'bottom', 'bright', 'sharp')
     np.savez(base + '_flow.npz', **{k: a[:, i] for i, k in enumerate(cols)}, fps=fps, n=n)
     np.savez(base + '_look.npz', frame=np.array(look_fr), desc=np.array(looks, np.float32), step=LOOK_STEP)
-    print(f'{os.path.basename(src)}: {n} frames, {len(rows)} flow rows, {len(looks)} looks in {time.time() - t0:.0f}s', flush=True)
+    return f'{os.path.basename(src)}: {n} frames, {len(rows)} flow rows, {len(looks)} looks in {time.time() - t0:.0f}s'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('renders', nargs='+')
+    ap.add_argument('--workers', type=int, default=None, help='clips at once (default: half the CPUs)')
+    a = ap.parse_args()
+    todo = [r for r in a.renders if not (os.path.exists(os.path.splitext(r)[0] + '_flow.npz') and
+                                         os.path.exists(os.path.splitext(r)[0] + '_look.npz'))]
+    for r in a.renders:
+        if r not in todo:
+            print(os.path.basename(r), 'done before', flush=True)
+    w = a.workers or max(1, min(len(todo), (os.cpu_count() or 2) // 2))
+    if w <= 1:
+        for r in todo:
+            print(analyze(r), flush=True)
+        return
+    with multiprocessing.Pool(w) as pool:
+        for line in pool.imap_unordered(analyze, todo):
+            print(line, flush=True)
+
+
+if __name__ == '__main__':
+    main()

@@ -27,7 +27,13 @@ renders (same frame count as the original), telemetry from the original.
   the mean energy of the kept phrases and keeping a drop. Lengths come in phrase steps (10 s at 96 BPM):
   `--target` gets the nearest path with good joins. The cut keeps the whole track's phrases (its first piece
   starts at 0): found again by bar-loudness jumps, a song cut from its first verse to its last chorus got its
-  phrases a bar late (2.2 s, not 0.2), and the scene cut into the chorus came 2 s after the chorus began.
+  phrases a bar late (2.2 s, not 0.2), and the scene cut into the chorus came 2 s after the chorus began. The
+  path was found by trying every set of up to 3 jumps: 20 s at 30 phrases, 2 min at 40 (a 5:40 track), most
+  of an edit's planning. The cost is the jump costs plus terms of the count of phrases, jumps, energy sum and two
+  flags, so a dynamic programme over those buckets (least jump cost per bucket) finds the same path in 0.1-0.3 s;
+  ties are common (jumping i -> j costs the same as i+1 -> j+1 when j resembles i+1) and the search took the
+  fewest jumps, then the earliest cuts: the programme runs from the end and reads the path forwards taking the
+  earliest jump among the paths as good, the same path on 25 of 25 tracks and targets of the old jobs.
 - **A song with words.** A song the owner names (not the catalogue) has a chorus everybody knows. Whisper
   (large-v3-turbo) on the whole mix gave 60-80 s chunks; the hook's words, placed by their share of the words in
   a chunk, fell within ~2 s of the starts of two sections of every round (a quiet half and a loud half of the
@@ -169,9 +175,22 @@ renders (same frame count as the original), telemetry from the original.
   one 9). Thumbnails do not see one subject from different angles; whole-frame CLIP does not either (random
   windows 0.88, the same roof 0.97, unrelated gardens up to 0.96). Activities in words do (Places).
 - **Decoding:** 4K HEVC 10-bit decodes at ~36 fps on the CPU in PyAV; NVDEC through PyAV was slower
-  (17 fps, the download to host memory); 640 px proxies decode at ~780 fps. Three Gyroflow renders in parallel
+  (17 fps, the download to host memory); 640 px proxies decode at ~2500 fps. Three Gyroflow renders in parallel
   give ~46 fps in total from 4K HEVC 10-bit. When re-encoding with PyAV, set `frame.time_base` with
   `frame.pts`, or the muxer fails with EINVAL.
+- **Frames into arrays** (`pix.py`): PyAV's `frame.to_ndarray(format=..., width=...)` and `frame.reformat(...)`
+  build a new swscale context for every frame, 3-7 ms each at 640 px: a 100 s proxy decoded in 1.2 s and converted
+  in 7.5 s (gray 10 s), and every script paid it per frame. One kept `VideoReformatter` per kind of conversion
+  (and per thread: a shared one crashed under four grading threads) gives the same pixels bit for bit at ~0.3 s.
+  With it and the clips analysed `--workers` at a time, `analyze.py` took 37 s instead of 294 for 25 min of GoPro
+  footage, `vis_motion.py` 125 s instead of 158 per clip (its tracking is the rest), `people.py passes` 178 s
+  instead of 278, the preview render 28 s instead of 61 for 87 s; the whole `features` step of 25 min of footage
+  7.7 min, every feature file identical. Half precision in YOLO saved nothing worth its differences.
+- **Model loads:** importing torch and transformers costs 8-9 s per process (the CLIP weights themselves 0.5 s
+  from the cache), and `features` started five such processes. The CLIP model is now loaded only when a script
+  needs it (`places.Lazy`), text embeddings are kept in `models/clip/texts.npz` and the aesthetic head beside its
+  `.pth`: beauty.py on a clip with its frame embeddings cached went from 14 s to 0.4 s, and an edit's find:TEXT,
+  `--want` and `--theme` do not load the model at all.
 
 ## Beautiful views
 
@@ -262,6 +281,20 @@ which owners call beautiful: those come in as editor's pieces.
   to 0.76. So 2.
 - **Distance in time:** footage close to another scene's shot pays `W_NEAR` (2, over 20 s); the parts of a
   split recording count as one flight (an edit once opened with two passes over the same warm-up 17 s apart).
+- **The order of recording within a day** (`--order W`): a sunset placed between daytime scenes had to be swapped
+  out by hand. The K scenes of a day are K slots of the day's usable footage in recording order, and a scene's
+  first shot pays W per slot its frame is off its own. A penalty against the scenes already placed on the day
+  instead anchored everything on the first one placed (a flying scene at 08:46): 4 of 9 cuts stepped back, then
+  3. With slots, on a forest edit of three days (fpv2022, 10 scenes): 4 of 9 cuts stepped back without it, 2 at
+  W 2, 0 at 4; the price was the piloting median 0.87 -> 0.79 -> 0.78 and look-alike pairs 3 -> 2 -> 6 (the same
+  hour side by side). edit.py and qc.py count the cuts that step back within a day always (7 of 11 on the Dagestan
+  voyage edit, 1 of 8 on a ski holiday).
+- **The best of N seeds** (`--seeds N`): one score per plan from the summary numbers, 0.35 the median piloting,
+  0.3 the share of musical hits met by a cut or a motion onset, 0.15 the onsets on beats, 0.2 the variety of
+  movements (the most common kind's share, runs over 3), 0.03 off per look-alike pair, plus 0.2 the share of
+  shots with people when people are weighted and 0.1 the mean join when joins are. Four seeds of one edit scored
+  0.79-0.86 (piloting 0.80-0.85, hits met 16-18 of 22, look-alikes 2-4): the differences are real but small, ~10 s
+  a seed, the chosen seed goes into the EDL.
 - **Themes** (`--theme "TEXT[:N]"`): a scene shows a theme when one of its shots averages 0.4 or more; once
   a theme has its N scenes, a candidate pays `W_THEME` 8, full from 0.55, nothing under 0.35. At 4 on a
   linear ramp a repeated person still came back (a person is worth `W_PEOPLE`). A shot under 2 s does not use
@@ -448,11 +481,14 @@ cut, and two hits before that cut falling on level flight.
   CLIP embeddings, trained on the gyro clips): the elevation now drifts and is pulled level.
 - Tracks without a constant tempo: a neural beat tracker (Beat This!).
 - Cuts on half beats, for musical hits between beats (two thirds of the hits of one track).
-- Scenes in the order of recording within a day (day, evening, sunset): a sunset placed between daytime scenes
-  had to be swapped out by hand.
 - Slow motion in finals: frame interpolation, or 100 fps sources.
-- Pick the best of N seeds by skill, sync and variety.
 - Trick types from the gyro axes (flip, roll, power loop, split-S); flips on snares, rolls on fills.
+- People's own motion at the 2 Hz samples of `detect`, measured and set aside: limb motion (wrists and ankles
+  against the hips between a person's consecutive samples, body heights per second) found a jump off a yacht's
+  side (0.94-0.95, the clip's top 3) but not the dancing boy or a jump off the roof: the greedy 2 Hz tracks break
+  at exactly those moments (half the rows have no previous sample), and the box's rise mixes with the drone's own
+  pitch. It needs the tracker's keypoints (people.py track, every other frame), which only jobs with screenshots
+  run today; a search for "where he dances" stays a subagent's job over frame sheets.
 - Proximity from the flow that pure camera rotation predicts, instead of an affine residual.
 - Gaps as heroes: flying through an opening shows as a 0.2-0.4 s brightness dip with high parallax and a new
   scene after it.

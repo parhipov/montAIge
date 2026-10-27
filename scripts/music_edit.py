@@ -70,11 +70,106 @@ def like(F, F_ref, labels_ref):
     return [labels_ref[int(np.argmax(np.einsum('kd,jkd->j', f, F_ref)))] for f in F]
 
 
+def path_cost(seq, sim, dur, quiet, fixed_pre, fixed_post, target, cls=None):
+    """The cost of one phrase sequence (the search's own formula), and its total length and jump cost."""
+    n = len(dur)
+    total = fixed_pre + fixed_post + sum(dur[i] for i in seq)
+    k = sum(1 for a, b in zip(seq, seq[1:]) if b != a + 1)
+    jump = 0.0
+    for i, j in zip(seq, seq[1:]):
+        if j != i + 1:
+            jump += 1.0 - max(sim[i + 1, j] if i + 1 < n else -1, sim[i, j - 1])
+    has_quiet = any(quiet[i] for i in seq) or not any(quiet)
+    cost = abs(total - target) / 10.0 + 4.0 * jump + 0.05 * k + (0 if has_quiet else 5.0)
+    if cls is not None:
+        drop = any(b == a + 1 and cls[b] - cls[a] >= 2 for a, b in zip(seq, seq[1:]))
+        cost += 1.5 * (1 - np.mean([cls[i] for i in seq]) / 3.0) - (0.5 if drop else 0.0)
+    return cost, total, jump
+
+
 def best_path(sim, dur, quiet, fixed_pre, fixed_post, target, max_jumps=3, cls=None):
     """Phrase index sequence (increasing, starts at 0, ends at the last) with <= max_jumps jumps.
 
     With energy classes (0 quiet .. 3 biggest) the path also prefers loud phrases and keeping
-    at least one drop (a phrase at least 2 classes above the one before it, as in the original)."""
+    at least one drop (a phrase at least 2 classes above the one before it, as in the original).
+
+    The cost of a path is its jump cost plus terms of its count of phrases, jumps, energy sum and two flags
+    (a quiet phrase kept, a drop kept), so a dynamic programme over (phrase, jumps, count, flags, energy sum)
+    needs only the least jump cost per such bucket, and the best bucket is the search's optimum: the same
+    path as trying every cut (`best_path_search`, which took 2 min on a 40-phrase track), in under a second.
+    Ties are common (jumping i -> j and i+1 -> j+1 cost the same when j resembles i+1), and the search took the
+    first set of cuts it tried (fewest jumps, then the earliest cuts): the programme runs from the end, so the
+    path is read forwards choosing the earliest jump among the paths that are as good."""
+    n = len(dur)
+    if n < 2 or np.ptp(dur) > 1e-9:                              # phrases of unequal length: the plain search
+        return best_path_search(sim, dur, quiet, fixed_pre, fixed_post, target, max_jumps, cls)
+    K = max_jumps
+    cl = [int(c) for c in cls] if cls is not None else [0] * n
+    S = sum(cl) + 1
+    drop_in = [False] + [cl[b] - cl[b - 1] >= 2 for b in range(1, n)]
+    jump_w = {(i, j): 1.0 - max(sim[i + 1, j] if i + 1 < n else -1, sim[i, j - 1])
+              for i in range(n) for j in range(i + 2, n)}
+    INF = np.inf
+    shape = (K + 1, n + 1, 2, 2, S)                              # jumps, phrases, quiet?, drop?, energy sum
+    V = [np.full(shape, INF) for _ in range(n)]                  # least jump cost of a path from phrase i to the end
+    V[n - 1][0, 1, int(quiet[n - 1]), 0, cl[n - 1]] = 0.0
+    for i in range(n - 2, -1, -1):
+        qi, ci = int(quiet[i]), cl[i]
+        for j in range(i + 1, n):
+            Vj = V[j]
+            if not np.isfinite(Vj).any():
+                continue
+            jumped = j > i + 1
+            w = jump_w[(i, j)] if jumped else 0.0
+            di = int(drop_in[j] and not jumped)                  # the drop between i and i+1, kept
+            ks, kd = (slice(0, K), slice(1, K + 1)) if jumped else (slice(0, K + 1), slice(0, K + 1))
+            for q in (0, 1):
+                for d in (0, 1):
+                    src = Vj[ks, :n, q, d, :S - ci] + w
+                    dst = V[i][kd, 1:, q | qi, d | di, ci:]
+                    np.minimum(dst, src, out=dst)
+    fixed = fixed_pre + fixed_post
+    best, starts = None, []
+    for k, c, q, d, s in zip(*np.nonzero(np.isfinite(V[0]))):
+        total = fixed + c * dur[0]
+        cost = abs(total - target) / 10.0 + 4.0 * float(V[0][k, c, q, d, s]) + 0.05 * k \
+            + (0 if q or not any(quiet) else 5.0)
+        if cls is not None:
+            cost += 1.5 * (1 - s / c / 3.0) - (0.5 if d else 0.0)
+        key = (round(cost, 9), int(k))
+        if best is None or key < best:
+            best, starts = key, []
+        if key == best:
+            starts.append((int(k), int(c), int(q), int(d), int(s)))
+    # read the path forwards: the states on paths as good as the best, the earliest jump first (the search's order)
+    seq, i, states = [0], 0, set(starts)
+    while i < n - 1:
+        moves = {}                                               # next phrase -> states there
+        for k, c, q, d, s in states:
+            v = V[i][k, c, q, d, s]
+            for j in range(i + 1, n):
+                jumped = j > i + 1
+                if jumped and k == 0:
+                    continue
+                w = jump_w[(i, j)] if jumped else 0.0
+                di = int(drop_in[j] and not jumped)
+                for q2 in (0, 1):
+                    for d2 in (0, 1):
+                        if (q2 | int(quiet[i])) != q or (d2 | di) != d:
+                            continue
+                        sub = (k - jumped, c - 1, q2, d2, s - cl[i])
+                        if V[j][sub] + w == v:
+                            moves.setdefault(j, set()).add(sub)
+        jumps = [j for j in moves if j > i + 1]
+        i = min(jumps) if jumps else i + 1
+        states = moves[i]
+        seq.append(i)
+    cost, total, jump = path_cost(seq, sim, dur, quiet, fixed_pre, fixed_post, target, cls)
+    return cost, seq, total, jump
+
+
+def best_path_search(sim, dur, quiet, fixed_pre, fixed_post, target, max_jumps=3, cls=None):
+    """best_path by trying every set of cuts: exponential in the number of phrases (2 min at 40)."""
     n = len(dur)
     best = None
     for k in range(max_jumps + 1):
@@ -144,12 +239,15 @@ def write_wav(path, x, sr):
         w.writeframes(pcm.tobytes())
 
 
-def shorten(path, out_wav, m, phrases, target):
-    """phrases: (first beat, n beats, quiet?[, energy class]) of each 16-beat phrase from the planner."""
+def shorten(path, out_wav, m, phrases, target, F=None):
+    """phrases: (first beat, n beats, quiet?[, energy class]) of each 16-beat phrase from the planner; F: their
+    phrase_features, when the caller has them already."""
     beats, P = m['beats'], m['period']
     starts = [p[0] for p in phrases]
     cls = [p[3] for p in phrases] if all(len(p) > 3 for p in phrases) else None
-    sim = phrase_similarity(path, beats, P, starts)
+    if F is None:
+        F = phrase_features(path, beats, P, starts)
+    sim = np.einsum('ikd,jkd->ij', F, F) / 4
     dur = [16 * P] * len(starts)
     quiet = [p[2] for p in phrases]
     pre = beats[starts[0]]                                        # pickup: 0 .. first phrase

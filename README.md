@@ -84,8 +84,8 @@ about twice as long as the job alone would have had.
 
 | step (15 min of 4K footage, RTX 3050) | time |
 |---|---|
-| stabilize and analyse, once per footage | ~40 min (Gyroflow ~25, detectors ~15) |
-| a new preview after a comment | 1-3 min |
+| stabilize and analyse, once per footage | ~30 min (Gyroflow ~25, detectors ~5) |
+| a new preview after a comment | ~1 min |
 | a one-minute 4K final | ~23 min |
 
 ### Why not show the model the footage

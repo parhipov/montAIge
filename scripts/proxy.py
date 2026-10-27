@@ -14,6 +14,8 @@ import time
 
 import av
 
+import pix
+
 ap = argparse.ArgumentParser()
 ap.add_argument('out_dir')
 ap.add_argument('--list', required=True)
@@ -42,7 +44,7 @@ for clip in clips:
     vs.options = {'crf': str(a.crf), 'preset': 'veryfast'}
     n = 0
     for fr in ic.decode(ist):
-        o = fr.reformat(width=a.width, height=a.height, format='yuv420p')   # keeps the clip's own timestamps
+        o = pix.reformat(fr, width=a.width, height=a.height, format='yuv420p')   # keeps the clip's own timestamps
         for p in vs.encode(o):
             oc.mux(p)
         n += 1

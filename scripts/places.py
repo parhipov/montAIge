@@ -36,7 +36,11 @@ import av
 import cv2
 import numpy as np
 
+import paths
+import pix
+
 EVERY_S = 0.5
+TEXT_CACHE = os.path.join(paths.MODELS, 'clip', 'texts.npz')     # text embeddings computed so far
 GENERIC_NOT = ['an open field outdoors', 'a large indoor sports hall', 'a room with people', 'the sky',
                'the ground up close', 'a blurry picture', 'a wall up close']
 HIT, MIN_S = 0.5, 1.0         # a stretch: probability over HIT for at least MIN_S (gaps of one sample allowed)
@@ -62,14 +66,29 @@ NOT_ACTIVITY = GENERIC_NOT + ['an empty garden with a house', 'a village seen fr
 ACT_HIT = 0.4                 # an activity is on screen where its probability is this or more
 
 
+class Lazy:
+    """The CLIP model (model, processor, device), loaded the first time it is unpacked: a script whose frame
+    embeddings are cached already and whose texts are in TEXT_CACHE never imports torch (8-10 s a process)."""
+    def __init__(self, cache):
+        self.cache, self.parts = cache, None
+
+    def load(self):
+        if self.parts is None:
+            import torch  # noqa: F401
+            from transformers import CLIPModel, CLIPProcessor
+            import gpu
+            dev = gpu.device()
+            name = 'openai/clip-vit-base-patch32'
+            self.parts = (CLIPModel.from_pretrained(name, cache_dir=self.cache).to(dev).eval(),
+                          CLIPProcessor.from_pretrained(name, cache_dir=self.cache), dev)
+        return self.parts
+
+    def __iter__(self):
+        return iter(self.load())
+
+
 def model_of(cache):
-    import torch
-    from transformers import CLIPModel, CLIPProcessor
-    import gpu
-    dev = gpu.device()
-    name = 'openai/clip-vit-base-patch32'
-    return (CLIPModel.from_pretrained(name, cache_dir=cache).to(dev).eval(),
-            CLIPProcessor.from_pretrained(name, cache_dir=cache), dev)
+    return Lazy(cache)
 
 
 def feats(out):
@@ -105,7 +124,7 @@ def embed(render, mdl):
         if i % every:
             continue
         frames.append(i)
-        batch.append(Image.fromarray(fr.to_ndarray(format='rgb24')))
+        batch.append(Image.fromarray(pix.ndarray(fr, format='rgb24')))
         if len(batch) == 64:
             flush()
     flush()
@@ -116,10 +135,24 @@ def embed(render, mdl):
 
 
 def text_emb(mdl, texts):
-    import torch
-    model, proc, dev = mdl
-    with torch.no_grad():
-        return feats(model.get_text_features(**proc(text=texts, return_tensors='pt', padding=True).to(dev))).cpu().numpy()
+    """Unit embeddings of the texts (n x 512), kept in TEXT_CACHE: only texts not seen before go through the
+    model, so beauty, the timeline, an edit's find:TEXT, --want and --theme do not load it for a few words."""
+    known = {}
+    if os.path.exists(TEXT_CACHE):
+        with np.load(TEXT_CACHE) as z:                           # closed before the file is replaced below
+            known = dict(zip(z['text'].tolist(), z['emb']))
+    new = [t for t in dict.fromkeys(texts) if t not in known]
+    if new:
+        import torch
+        model, proc, dev = mdl
+        with torch.no_grad():
+            e = feats(model.get_text_features(**proc(text=new, return_tensors='pt', padding=True).to(dev))).cpu().numpy()
+        known.update(zip(new, e.astype(np.float32)))
+        os.makedirs(os.path.dirname(TEXT_CACHE), exist_ok=True)
+        np.savez(TEXT_CACHE + '.tmp.npz', text=np.array(list(known), dtype=str),
+                 emb=np.stack(list(known.values())).astype(np.float32))
+        os.replace(TEXT_CACHE + '.tmp.npz', TEXT_CACHE)
+    return np.stack([known[t] for t in texts]).astype(np.float32)
 
 
 def probs(emb, temb, n_q):
@@ -161,7 +194,7 @@ def sheet_of(items, path, per_row=8):
         img = None
         for fr in c.decode(st):
             if float(fr.pts * st.time_base) >= sec:
-                img = cv2.resize(fr.to_ndarray(format='bgr24'), (200, 150))
+                img = cv2.resize(pix.ndarray(fr, format='bgr24'), (200, 150))
                 break
         c.close()
         if img is None:

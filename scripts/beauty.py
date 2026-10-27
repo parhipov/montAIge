@@ -35,9 +35,14 @@ SCENIC_HIT = 0.5        # a scenic half second
 
 
 def aesthetic_head():
-    import torch
-    sd = torch.load(AES_HEAD, map_location='cpu', weights_only=True)
-    return sd['weight'].numpy().ravel().astype(np.float32), float(sd['bias'])
+    """The head's weight (512) and bias, kept as .npz beside the .pth after the first read (torch not needed)."""
+    npz = os.path.splitext(AES_HEAD)[0] + '.npz'
+    if not os.path.exists(npz):
+        import torch
+        sd = torch.load(AES_HEAD, map_location='cpu', weights_only=True)
+        np.savez(npz, weight=sd['weight'].numpy().ravel().astype(np.float32), bias=float(sd['bias']))
+    z = np.load(npz)
+    return z['weight'], float(z['bias'].ravel()[0])
 
 
 def main():

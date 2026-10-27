@@ -22,6 +22,7 @@ the tilt is not trusted: flying low over a slope), npts,
 q (n x 4 wxyz), fps, hfov, vfov.
 """
 import argparse
+import multiprocessing
 import os
 import sys
 import time
@@ -29,6 +30,10 @@ import time
 import av
 import cv2
 import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import pix  # noqa: E402
 
 FB_PX = 1.0             # forward-backward tracking error that keeps a track
 RANSAC_PX = 1.5         # inlier distance of the rotation fit, px
@@ -148,7 +153,7 @@ def tracks(path, pick=None):
         if not want and (pick is None or k + 1 not in pick):
             prev = None
             continue
-        g = fr.to_ndarray(format='gray')
+        g = pix.ndarray(fr, format='gray')
         if want and prev is not None:
             yield (k, *track(prev, g))
         elif want:
@@ -207,7 +212,7 @@ def pair_rotations(path, hfov, vfov):
     prev, R_last = None, np.eye(3)
     for fr in c.decode(st):
         k = int(round(float(fr.pts * st.time_base) * fps))
-        g = fr.to_ndarray(format='gray')
+        g = pix.ndarray(fr, format='gray')
         rv, inl, npt = np.zeros(3), 0.0, 0
         if prev is not None:
             def guess(p, R=R_last):
@@ -273,6 +278,37 @@ def integrate(rots, fps, elev0=ELEV0, tau=TAU_S, trust=None):
     return np.column_stack([q[:, 3], q[:, :3]])
 
 
+def process(job):
+    """One render's motion from its picture -> (lines to print, failed?)."""
+    r, hf, vf = job
+    dst = os.path.splitext(r)[0] + '_vis.npz'
+    t0 = time.time()
+    lines = []
+    if hf is not None and vf is None:
+        vf = square_vfov(r, hf)[0]
+    if hf is None or vf is None:
+        cal = calibrate(r, np.random.default_rng(0))
+        if cal is None:
+            lines.append(f'{os.path.basename(r)}: too little motion to find the field of view; pass --hfov (square '
+                         f'pixels) or --hfov --vfov')
+            return lines, True
+        hf, vf = hf or cal[0], vf or cal[1]
+        _, W, H = square_vfov(r, hf)
+        aspect = np.tan(np.radians(vf) / 2) / np.tan(np.radians(hf) / 2) * W / H
+        lines.append(f'{os.path.basename(r)}: field of view {cal[0]:.0f} x {cal[1]:.0f} deg from {cal[2]} moving frame '
+                     f'pairs (cost {cal[3]:.2f} px^2, median over the grid {cal[4]:.2f})'
+                     + ('' if any(lo <= aspect <= hi for lo, hi in PIXEL_ASPECTS) else
+                        f'; WARN pixel aspect {aspect:.2f}, neither square nor SuperView: pass --hfov'))
+    fr, rot, inl, npt, fps = pair_rotations(r, hf, vf)
+    q = integrate(rot, fps, trust=trusted(inl, fps))
+    np.savez(dst, frame=fr, rot=rot.astype(np.float32), inl=inl.astype(np.float32), npts=npt, q=q, fps=fps,
+             hfov=hf, vfov=vf)
+    lines.append(f'{os.path.basename(r)}: {len(fr)} frames, median {np.median(npt):.0f} tracks, inliers '
+                 f'{np.median(inl[1:]) * 100:.0f} %, rotation trusted on {trusted(inl, fps).mean() * 100:.0f} %, '
+                 f'in {time.time() - t0:.0f}s')
+    return lines, False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('renders', nargs='+')
@@ -281,8 +317,10 @@ def main():
                     help='vertical field of view (default: from --hfov with square pixels, else calibrated)')
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--integrate', action='store_true', help='only chain the saved rotations again (new pull settings)')
+    ap.add_argument('--workers', type=int, default=None,
+                    help='clips at once (processes; the tracking is single-threaded CPU work; default half the CPUs)')
     a = ap.parse_args()
-    failed = []
+    todo = []
     for r in a.renders:
         dst = os.path.splitext(r)[0] + '_vis.npz'
         if a.integrate:
@@ -294,31 +332,17 @@ def main():
         if os.path.exists(dst) and not a.force:
             print(os.path.basename(r), 'done before')
             continue
-        t0 = time.time()
-        hf, vf = a.hfov, a.vfov
-        if hf is not None and vf is None:
-            vf = square_vfov(r, hf)[0]
-        if hf is None or vf is None:
-            cal = calibrate(r, np.random.default_rng(0))
-            if cal is None:
-                print(f'{os.path.basename(r)}: too little motion to find the field of view; pass --hfov (square '
-                      f'pixels) or --hfov --vfov', flush=True)
-                failed.append(r)
-                continue
-            hf, vf = hf or cal[0], vf or cal[1]
-            _, W, H = square_vfov(r, hf)
-            aspect = np.tan(np.radians(vf) / 2) / np.tan(np.radians(hf) / 2) * W / H
-            print(f'{os.path.basename(r)}: field of view {cal[0]:.0f} x {cal[1]:.0f} deg from {cal[2]} moving frame '
-                  f'pairs (cost {cal[3]:.2f} px^2, median over the grid {cal[4]:.2f})'
-                  + ('' if any(lo <= aspect <= hi for lo, hi in PIXEL_ASPECTS) else
-                     f'; WARN pixel aspect {aspect:.2f}, neither square nor SuperView: pass --hfov'), flush=True)
-        fr, rot, inl, npt, fps = pair_rotations(r, hf, vf)
-        q = integrate(rot, fps, trust=trusted(inl, fps))
-        np.savez(dst, frame=fr, rot=rot.astype(np.float32), inl=inl.astype(np.float32), npts=npt, q=q, fps=fps,
-                 hfov=hf, vfov=vf)
-        print(f'{os.path.basename(r)}: {len(fr)} frames, median {np.median(npt):.0f} tracks, inliers '
-              f'{np.median(inl[1:]) * 100:.0f} %, rotation trusted on {trusted(inl, fps).mean() * 100:.0f} %, '
-              f'in {time.time() - t0:.0f}s', flush=True)
+        todo.append((r, a.hfov, a.vfov))
+    failed = 0
+    w = a.workers or max(1, min(len(todo), (os.cpu_count() or 2) // 2))
+    if w <= 1:
+        results = map(process, todo)
+    else:
+        pool = multiprocessing.Pool(w)
+        results = pool.imap_unordered(process, todo)
+    for lines, bad in results:
+        print('\n'.join(lines), flush=True)
+        failed += bad
     return 1 if failed else 0
 
 

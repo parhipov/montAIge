@@ -16,6 +16,8 @@ import os
 import av
 import numpy as np
 
+import pix
+
 HZ = 10.0
 CUT_JUMP = 3.0      # a cut: thumbnail change this many times the export's median change, and over 12 (0-255)
 MIN_PIECE_S = 2.0
@@ -34,7 +36,7 @@ def thumbs(path, crop_w=0.5, crop_h=0.5):
         for i, f in enumerate(c.decode(st)):
             if i % step:
                 continue
-            g = f.to_ndarray(format='gray', width=320, height=max(int(round(320 / aspect)), 12)).astype(np.float32)
+            g = pix.ndarray(f, format='gray', width=320, height=max(int(round(320 / aspect)), 12)).astype(np.float32)
             h, w = g.shape
             g = g[int(h * (1 - crop_h) / 2):int(h * (1 + crop_h) / 2), int(w * (1 - crop_w) / 2):int(w * (1 + crop_w) / 2)]
             h, w = g.shape

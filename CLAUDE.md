@@ -67,6 +67,10 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   its context. One edit: 33M tokens, of which the search for one dancing boy ~8.5M in the main context.
 - A toolkit, not a fixed pipeline: `montage.py` does what every job needs; locations, activities, exports,
   climbs and themes are called when a job asks for them. A one-off can stay a one-off script in the job.
+- The scripts are long (`edit.py` 2900 lines, 40k tokens): to change one, grep for the function and read that
+  range, never the whole file; the options are all in this file. Frames become arrays through `pix.py` (one
+  conversion context: a new one per frame cost more than decoding), CPU steps take `--workers`
+  (`analyze.py`, `vis_motion.py`), CLIP text embeddings are cached (`models/clip/texts.npz`).
 - What a job teaches goes into `scripts/` as a general rule (a sharper definition, an option), never as a
   special case for that footage; footage-specific things come in as inputs (texts, moments, themes).
 
@@ -111,8 +115,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 ## edit.py options
 
 - Length and music: `--target` (seconds; the track is shortened by whole phrases), `--bpm`, `--seed N`,
-  `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the musical hits), `--booms` (the hits
-  are the bass booms, the sub-bass coming in after a gap: "cuts on the boom" of a song).
+  `--seeds N` (N plans, the best kept by one score: piloting, hits met, onsets on beats, variety, look-alikes; a
+  line per seed, ~10 s each), `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the
+  musical hits), `--booms` (the hits are the bass booms, the sub-bass coming in after a gap: "cuts on the boom"
+  of a song).
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
   `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another
@@ -139,7 +145,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
 - Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty);
   `--sessions H`: a day's clips more than H hours apart are chapters of their own (the flights by day and the
-  evening's), counted by `--chapters`. Landings are marked and kept for the last scene.
+  evening's), counted by `--chapters`; `--order W` (e.g. 4): scenes in the order of recording within a day (day,
+  evening, sunset); edit.py and qc.py count the scene cuts that step back in time. Landings are marked and kept
+  for the last scene.
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`); a piece longer than its phrase plays
   faster, up to 1.7x. The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
@@ -147,7 +155,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   track's last hit, the music after it as the ending.
 - Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
   clip's colour matched to that clip's) (kept in the EDL for `final.py`).
-- `--plan-only`, `--debug`, `--height`, `--fps`.
+- `--plan-only`, `--debug`, `--height`, `--fps`, `--brief` (no footage table: montage.py prints it for the first
+  edit of a run only).
 
 ## Other tools
 

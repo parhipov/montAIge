@@ -62,6 +62,7 @@ import cv2
 import numpy as np
 
 import gpu
+import pix
 
 NOSE, LEYE, REYE, LEAR, REAR, LSH, RSH, LEL, REL, LWR, RWR, LHIP, RHIP, LKN, RKN, LAN, RAN = range(17)
 KP_OK = 0.35
@@ -160,7 +161,7 @@ def detect(model, src, every, obj_model=None):
         i = int(round(float(fr.pts * st.time_base) * fps))
         if i % every == 0:
             samples.append(i)
-            imgs.append(fr.to_ndarray(format='bgr24'))
+            imgs.append(pix.ndarray(fr, format='bgr24'))
     c.close()
     rows = dict(frame=[], box=[], conf=[], kp=[], app=[], hold=[], wave=[], face=[], goggles=[], radio=[])
     poses = run_pose(model, imgs)
@@ -250,7 +251,7 @@ def find_pilot(renders, k=6, sheet=None):
                 c.seek(int(max(f - 2, 0) / fps / st.time_base), stream=st, backward=True)
                 for fr in c.decode(st):
                     if int(round(float(fr.pts * st.time_base) * fps)) >= f:
-                        img = fr.to_ndarray(format='bgr24')
+                        img = pix.ndarray(fr, format='bgr24')
                         break
                 c.close()
                 H, W = img.shape[:2]
@@ -295,7 +296,7 @@ def crops_at(render, z, pad=0.1, pad_y=None):
         f = int(round(float(fr.pts * st.time_base) * fps))
         if f not in want:
             continue
-        img = fr.to_ndarray(format='rgb24')
+        img = pix.ndarray(fr, format='rgb24')
         H, W = img.shape[:2]
         for i in want[f]:
             cx, cy, w, h = z['box'][i]
@@ -335,9 +336,15 @@ def clip_probs(cache):
 
 def clip_scores(renders, cache):
     """Per person row: probability (CLIP, zero-shot) that it is the pilot -> <render>_pilotclip.npy."""
-    probs = clip_probs(cache)
     n_p, n_o = len(PILOT_TEXTS), len(OTHER_TEXTS)
-    for r in renders:
+    todo = [r for r in renders if not all(                       # done before, for these people rows
+        os.path.exists(os.path.splitext(r)[0] + s) and
+        os.path.getmtime(os.path.splitext(r)[0] + s) >= os.path.getmtime(os.path.splitext(r)[0] + '_people.npz')
+        for s in ('_pilotclip.npy', '_notperson.npy'))]
+    if not todo:
+        return
+    probs = clip_probs(cache)
+    for r in todo:
         base = os.path.splitext(r)[0]
         z = np.load(base + '_people.npz')
         p = probs(crops_at(r, z), PILOT_TEXTS + OTHER_TEXTS + NOT_PERSON_TEXTS)
@@ -456,7 +463,7 @@ def track_people(weights, render, step=TRACK_STEP, tracker=TRACKER):
         i = int(round(float(fr.pts * st.time_base) * fps))
         if i % step and i not in want:
             continue
-        img = fr.to_ndarray(format='bgr24')
+        img = pix.ndarray(fr, format='bgr24')
         r = model.track(img, persist=True, tracker=tracker, imgsz=640, conf=0.1, verbose=False)[0]
         if r.boxes is None or r.boxes.id is None or not len(r.boxes):
             continue
@@ -563,7 +570,7 @@ def cut_ref(original, sec, x, out_path, weights):
     img = None
     for fr in c.decode(st):
         if float(fr.pts * st.time_base) >= sec:
-            img = fr.to_ndarray(format='bgr24')
+            img = pix.ndarray(fr, format='bgr24')
             break
     c.close()
     if img is None:
@@ -631,7 +638,7 @@ def frames_at(render, wanted):
             pos = i
             if i >= f:
                 if i == f:
-                    out[f] = fr.to_ndarray(format='rgb24')
+                    out[f] = pix.ndarray(fr, format='rgb24')
                 break
     c.close()
     return out
@@ -1159,7 +1166,7 @@ def poses_of(model, c, st, fps, a, b):
             break
         if i >= a:
             frames.append(i)
-            imgs.append(fr.to_ndarray(format='bgr24'))
+            imgs.append(pix.ndarray(fr, format='bgr24'))
     out = []
     for bx, cf, kp in run_pose(model, imgs):
         m = cf >= PASS_CONF
@@ -1187,7 +1194,7 @@ def scan_big(model, src):
         i = int(round(float(fr.pts * st.time_base) * fps))
         if i % every == 0:
             idx.append(i)
-            imgs.append(fr.to_ndarray(format='bgr24'))
+            imgs.append(pix.ndarray(fr, format='bgr24'))
             if len(imgs) == 64:
                 flush()
     flush()
@@ -1275,7 +1282,7 @@ def passes_sheet(renders, sheet, per_row=8):
             for fr in c.decode(st):
                 i = int(round(float(fr.pts * st.time_base) * fps))
                 if want and i >= want[0]:
-                    tiles.append(cv2.resize(fr.to_ndarray(format='bgr24'), (160, 120)))
+                    tiles.append(cv2.resize(pix.ndarray(fr, format='bgr24'), (160, 120)))
                     want.pop(0)
                 if not want:
                     break

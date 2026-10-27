@@ -87,14 +87,46 @@ PROXY_W = 640
 MODELS = paths.MODELS
 
 
+def short_cmd(cmd):
+    """The command as a line to read: the script's name, and a run of three or more files of one folder as
+    `folder/*.ext (n)` (a step over 16 renders printed 16 paths)."""
+    out, grp = [], []
+
+    def flush():
+        if len(grp) > 2:
+            d, ext = os.path.dirname(grp[0]), os.path.splitext(grp[0])[1]
+            out.append(f'{d}/*{ext} ({len(grp)})')
+        else:
+            out.extend(grp)
+        grp.clear()
+    for i, c in enumerate(cmd):
+        if i < 2:
+            out.append(os.path.basename(c))
+            continue
+        if os.path.splitext(c)[1] and not c.startswith('-') and (not grp or os.path.dirname(c) == os.path.dirname(grp[0])
+                                                                 and os.path.splitext(c)[1] == os.path.splitext(grp[0])[1]):
+            grp.append(c)
+            continue
+        flush()
+        out.append(c)
+    flush()
+    return ' '.join(out)
+
+
 def run(args, log=None):
-    """A step's script with this Python; its output to the console (or a log file)."""
+    """A step's script with this Python; its output to the console (or a log file); the echo ends with the time
+    the step took."""
     cmd = [sys.executable] + [str(a) for a in args]
-    print('  $ ' + ' '.join(os.path.basename(c) if i < 2 else c for i, c in enumerate(cmd)), flush=True)
+    print('  $ ' + short_cmd(cmd), end='' if log else '\n', flush=True)
+    t0 = time.time()
     if log:
         with open(log, 'a', encoding='utf-8') as fh:
-            return subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
-    return subprocess.run(cmd).returncode
+            rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT).returncode
+    else:
+        rc = subprocess.run(cmd).returncode
+    print(f'  ({time.time() - t0:.0f}s)' + (f'  FAILED, exit code {rc}' + (f': see {log}' if log else '') if rc else ''),
+          flush=True)
+    return rc
 
 
 def has_track(path, fourcc):
@@ -410,6 +442,7 @@ def preview_height(proxy):
 
 def edits(job, job_path, out, proxy, cache, plan_only=False):
     series = []
+    brief = False                                                # the footage table once per run (edit.py --brief)
     for e in job.get('edit', []):
         name = e['name']
         dst = os.path.join(out, name, name + '.mp4')
@@ -441,8 +474,11 @@ def edits(job, job_path, out, proxy, cache, plan_only=False):
                     cmd += ['--avoid', prev]
             if plan_only:
                 cmd += ['--plan-only']
+            if brief:
+                cmd += ['--brief']
             if run(cmd + args):
                 raise SystemExit(f'{name}: edit.py failed')
+            brief = True
         else:
             print(f'  {name}: up to date')
         if e.get('series'):

@@ -30,6 +30,7 @@ import numpy as np
 
 import gpu
 import paths
+import pix
 import people as pp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,7 +74,7 @@ def frame_at(c, st, t):
     c.seek(int(max(t - 0.6, 0) / st.time_base), stream=st, backward=True)
     for fr in c.decode(st):
         if float(fr.pts * st.time_base) >= t - 0.005:
-            return fr.to_ndarray(format='bgr24')
+            return pix.ndarray(fr, format='bgr24')
     return None
 
 
@@ -93,7 +94,7 @@ class SeqReader:
         for fr in self.it:
             self.t = float(fr.pts * self.st.time_base)
             if self.t >= t - 0.005:
-                return fr.to_ndarray(format='bgr24')
+                return pix.ndarray(fr, format='bgr24')
         self.it = None
         return None
 

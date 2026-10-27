@@ -28,6 +28,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import edit as bf  # noqa: E402
+import pix  # noqa: E402
 MARGIN_S, DISSOLVE_S = 1.0, 0.5
 FADE_IN_S, FADE_OUT_S = 0.6, 2.0     # as in edit.py's preview, so an --end moment sits right before the fade
 MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября',
@@ -46,7 +47,7 @@ def thumbs(path, first, count, size=(64, 36)):
         if i >= first + count:
             break
         if i >= first:
-            out[i] = fr.to_ndarray(format='gray', width=size[0], height=size[1]).astype(np.float32)
+            out[i] = pix.ndarray(fr, format='gray', width=size[0], height=size[1]).astype(np.float32)
     c.close()
     return out
 
@@ -150,8 +151,8 @@ class Reader:
                 x0, y0 = self.crop
                 deep = '10' in fr.format.name or fr.format.name.startswith('p01')
                 sw, sh = self.scale or (None, None)
-                img = fr.reformat(width=sw, height=sh, format='rgb48le' if deep else 'rgb24', src_colorspace='itu709',
-                                  dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
+                img = pix.ndarray(fr, width=sw, height=sh, format='rgb48le' if deep else 'rgb24', src_colorspace='itu709',
+                                  dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG')
                 self.prev = (self.cur, self.img)
                 self.img = np.ascontiguousarray(img[y0:y0 + self.H, x0:x0 + self.W])
             self.cur = n
@@ -385,8 +386,8 @@ def main():
             img = img.astype(np.float32) * max(g, 0.0)
         if img.dtype != np.uint8:
             img = np.clip(img, 0, 255).astype(np.uint8)
-        vf = av.VideoFrame.from_ndarray(img, format='rgb24').reformat(
-            format='yuv420p', src_colorspace='itu709', dst_colorspace='itu709', src_color_range='JPEG', dst_color_range='MPEG')
+        vf = pix.reformat(av.VideoFrame.from_ndarray(img, format='rgb24'), format='yuv420p', src_colorspace='itu709',
+                          dst_colorspace='itu709', src_color_range='JPEG', dst_color_range='MPEG')
         vf.pts = jj
         for p in vs.encode(vf):
             oc.mux(p)

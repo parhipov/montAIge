@@ -29,7 +29,9 @@ Output: the preview (640 px wide by default, 25 fps), <out>_edl.json (everything
 quality render), <out>_plan.png.
 """
 import argparse
+import contextlib
 import glob
+import io
 import json
 import os
 import sys
@@ -45,6 +47,7 @@ from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import music as mus  # noqa: E402
+import pix  # noqa: E402
 
 ROLL_WEIGHT = 0.7       # roll is partly flattened by stabilization
 VIS_LP_HZ = 1.5         # what survives Gyroflow smoothing, roughly
@@ -159,6 +162,11 @@ BOOMS, BOOM_BAND, BOOM_PRE_S, BOOM_JUMP_DB, BOOM_LEVEL_DB = [False], (30.0, 90.0
 # W_NEAR: footage close in time to a shot of another scene, exp(-gap / NEAR_TAU_S); at 8 s and 0.5 two
 # passes over the same warm-up 17 s apart (split files of one recording) opened the tennis "game" edit
 NEAR_TAU_S = 20.0
+# --order W: scenes in the order of recording within a day (a sunset between daytime scenes had to be swapped out by
+# hand): the K scenes of a day are K slots of its usable footage in recording order, and a scene's first shot pays
+# W per slot its frame is off its own (day_rank, order_penalty). Scenes are placed by priority, so a penalty
+# against the scenes already placed anchored everything on the first one: 4 of 9 cuts stepped back, then 3
+W_ORDER = 0.0
 # people (objects.py / YOLO): a person covering PEOPLE_FULL of the frame counts fully, smaller ones less
 W_PEOPLE, PEOPLE_FULL = 0.0, 0.02
 # people-first edits (--people): a shot with nobody in it outside the flying scenes; the pilot alone
@@ -1604,9 +1612,46 @@ def source_frames(x, f):
     return int(round((x['t1'] - x['t0']) * x['speed'] * f.fps))
 
 
-def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), theme=None, joins=(None, None)):
+def scene_time(sc, flights):
+    """When the first shot of a placed scene was recorded, seconds since the epoch (None without a time)."""
+    f = flights[sc['flight']]
+    when = getattr(f, 'when', None)
+    return when.timestamp() + sc['shots'][0]['src_frame'] / f.fps if when is not None else None
+
+
+def day_rank(f, flights, cache):
+    """Where every frame of flight f sits in the recording of its day: 0 at the first usable frame of the day's
+    flights, 1 at the last (usable frames every 0.5 s, by their recording time); None without times."""
+    day = getattr(f, 'day', None)
+    if day is None or getattr(f, 'when', None) is None:
+        return None
+    if day not in cache:
+        ts = []
+        for g in flights:
+            if getattr(g, 'day', None) == day and getattr(g, 'when', None) is not None:
+                step = max(int(0.5 * g.fps), 1)
+                fr = np.flatnonzero(g.usable[::step]) * step
+                ts.append(g.when.timestamp() + fr / g.fps)
+        cache[day] = np.sort(np.concatenate(ts)) if ts else np.zeros(0)
+    ts = cache[day]
+    if ts.size < 2:
+        return None
+    t = f.when.timestamp() + np.arange(f.n) / f.fps
+    return np.searchsorted(ts, t) / ts.size
+
+
+def order_penalty(rank, k, K):
+    """W_ORDER per slot a frame's place in the day's recording (rank, 0..1) is off scene k's own slot of the K
+    scenes of that day: nothing inside its slot, W_ORDER one slot away, 2 W_ORDER two."""
+    if not W_ORDER or rank is None or K < 2:
+        return None
+    return W_ORDER * np.clip(np.abs(rank - (k + 0.5) / K) * K - 0.5, 0, None)
+
+
+def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), theme=None, joins=(None, None),
+             order=None):
     """Best start frames of all shots of a scene inside flight f, shots in forward order; joins: the neighbour
-    scenes' sides of its cuts (cut_side), for W_JOIN."""
+    scenes' sides of its cuts (cut_side), for W_JOIN; order: a per-frame penalty on the first shot (order_penalty)."""
     shots = scene['shots']
     ns = [source_frames(x, f) for x in shots]
     mu = scene.get('must')                                       # (flight, first frame, last frame, end at or None)
@@ -1617,6 +1662,8 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
              for k, (x, n) in enumerate(zip(shots, ns))]
     N = f.n
     idx = np.arange(N)
+    if order is not None:                                        # --order: recorded out of turn within its day
+        nodes[0] = nodes[0] - order
     if W_JOIN and joins[0] is not None:                          # the cut in: the scene before goes out
         nodes[0] = nodes[0] + W_JOIN * join(*joins[0], f, idx, shots[0]['speed'])
     if W_JOIN and joins[1] is not None:                          # the cut out: the scene after comes in
@@ -1826,10 +1873,13 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
     moves = []                                                   # (movement signature, music time) of placed shots
     hero_used = set()
     shown = [0] * len(THEMES)                                    # scenes that show each --theme
+    ranks = {}                                                   # day -> recording times of its usable footage
     for i in order:
         sc = scenes[i]
         nbr = [scenes[j].get('flight') for j in (i - 1, i + 1) if 0 <= j < len(scenes)]
         joins = (cut_side(scenes, i - 1, flights, True), cut_side(scenes, i + 1, flights, False))
+        same_day = [j for j, s in enumerate(scenes) if s.get('day') == sc.get('day')]   # its slot among its day's
+        k_day, K_day = same_day.index(i), len(same_day)
         best = None
         # the scene's own recording day first; if nothing fits there, the next day, then the previous one
         days = sorted({getattr(f, 'day', None) for f in flights} - {None})
@@ -1844,7 +1894,8 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
                 if sc.get('must') and sc['must'][0] != f.idx:
                     continue
                 r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng, look_penalty(f, seen), moves, hero_used,
-                             theme_penalty(f, shown), joins)
+                             theme_penalty(f, shown), joins,
+                             order_penalty(day_rank(f, flights, ranks), k_day, K_day) if W_ORDER else None)
                 if r is None:
                     continue
                 score = r[0] - W_SAME_SCENE * sum(1 for x in nbr if x is not None and flights[x].rec == f.rec)
@@ -2020,7 +2071,84 @@ def time_map(x):
     return PchipInterpolator(np.array(x['anchor_t']), np.array(x['anchors']))
 
 
+def plan_edit(m, flights, a, rng, musts, avoid):
+    """The plan: scenes on the music, the editor's pieces and the chapters placed, every scene given its footage
+    (assign), speed bent onto the hits. The noise generator rng makes it one of many (--seed, --seeds)."""
+    scenes = plan_scenes(m, rng)
+    scenes[-1]['last'] = True
+    if all(hasattr(f, 'day') for f in flights):
+        w, cnt = chapters(scenes, flights)
+        print(f'  chapters (good seconds -> scenes): {", ".join(f"{d}: {w[d]:.0f}s -> {cnt[d]}" for d in cnt)}')
+    if any(x[4] for x in musts):
+        # the editor's opening piece takes the first phrase: a flying scene or a hero planned there gives way (with
+        # --sections a track's chorus can open it: the first phrase was a flying scene, the pickup stayed a 1 s
+        # scene of another clip and the piece came second, "an off-topic piece for a couple of seconds")
+        first = scenes[1] if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else scenes[0]
+        first['hero'] = first['slow_hero'] = first['fly'] = False
+    short_pickup = scenes[0]['kind'] == 'pickup' and sum(
+        x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] < PICKUP_MIN_S
+    if (any(x[4] for x in musts) or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
+            not (scenes[1]['hero'] or scenes[1]['fly']):
+        # the opening piece opens the edit: the pickup before the first phrase joins that phrase's first shot
+        # (it took the opening shot otherwise, and the piece came second); so does a pickup too short to be a shot
+        p, s1 = scenes[0]['shots'][0], scenes[1]['shots']
+        s1[0] = dict(merged([p, s1[0]]), cls=s1[0]['cls'], speed=s1[0]['speed'], q_music=s1[0]['q_music'])
+        scenes = scenes[1:]
+        for i, s in enumerate(scenes):
+            s['idx'] = i
+    scenes = assign(scenes, flights, m, rng, musts, avoid)
+    if a.no_ramps or (not a.ramps and not HIT_ON[0]):
+        for x in (x for s in scenes for x in s['shots']):
+            constant_speed(x)
+    else:
+        ramp_all(scenes, flights, hits_only=not a.ramps)
+    if END_HIT[0] is not None and scenes[-1].get('must'):
+        land_end(scenes, flights)
+    return scenes
+
+
 # ================================================================== reports
+def lookalike_pairs(scenes, flights):
+    """Pairs of shots in different scenes whose look thumbnails are within LOOK_SIGMA (the same view twice)."""
+    lk = [(s['idx'], shot_look(flights[x['flight']], x['src_frame'], x['src_frames'])) for s in scenes for x in s['shots']]
+    lk = [(i, d) for i, d in lk if d is not None]
+    return sum(1 for k, (i, a) in enumerate(lk) for j, b in lk[k + 1:]
+               if i != j and np.sqrt(((a - b) ** 2).mean()) < LOOK_SIGMA)
+
+
+def edit_score(scenes, flights, m):
+    """One number to rank plans of the same job and track (--seeds N), from what the summary lines print: the
+    median piloting of the shots, the musical hits met by a cut or a motion onset, motion onsets on beats, the
+    variety of movements (the most common kind's share, runs of one kind) and look-alike shots across scenes;
+    people in the picture when they are weighted, matching scene cuts when they are. -> (score, parts to print)"""
+    shots = [x for s in scenes for x in s['shots']]
+    skill = float(np.median([x['skill'] for x in shots]))
+    nh, hc, hm, _ = hit_stats(scenes, flights, m)
+    hits = (hc + hm) / nh if nh else 1.0
+    on, tot = sync_stats(scenes, flights, m)
+    sync = on / tot if tot else 0.5
+    mv = [x['move'] for x in shots]
+    run = best_run = 1
+    for p, q in zip(mv, mv[1:]):
+        run = run + 1 if p == q else 1
+        best_run = max(best_run, run)
+    variety = (1 - max(mv.count(k) for k in set(mv)) / len(mv)) * min(1.0, 3.0 / best_run)
+    close = lookalike_pairs(scenes, flights)
+    score = 0.35 * skill + 0.3 * hits + 0.15 * sync + 0.2 * variety - 0.03 * close
+    parts = {'piloting': f'{skill:.2f}', 'hits met': f'{hc + hm}/{nh}', 'onsets on beat': f'{sync * 100:.0f} %',
+             'variety': f'{variety:.2f}', 'look-alikes': close}
+    if W_PEOPLE:
+        pp = float(np.mean([x.get('people', 0.0) > 0.15 for x in shots]))
+        score += 0.2 * pp
+        parts['people'] = f'{pp * 100:.0f} %'
+    if W_JOIN:
+        jn = [join(*cut_side(scenes, i, flights, True), *cut_side(scenes, i + 1, flights, False))
+              for i in range(len(scenes) - 1)]
+        score += 0.1 * (float(np.mean(jn)) if jn else 0.0)
+        parts['joins'] = f'{np.mean(jn) if jn else 0:.2f}'
+    return float(score), parts
+
+
 def sync_stats(scenes, flights, m):
     on = tot = 0
     for x in (x for s in scenes for x in s['shots']):
@@ -2133,8 +2261,8 @@ def clip_pixels(f, lut, k=MATCH_FRAMES, w=160):
             c.seek(int(i / f.fps / st.time_base), stream=st, backward=True)
             for fr in c.decode(st):
                 if float(fr.pts * st.time_base) * f.fps >= i - 0.5:
-                    img = fr.reformat(width=w, height=h, format='rgb24', src_colorspace='itu709',
-                                      dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
+                    img = pix.ndarray(fr, width=w, height=h, format='rgb24', src_colorspace='itu709',
+                                      dst_colorspace='itu709', src_color_range='MPEG', dst_color_range='JPEG')
                     px.append((lut(img) if lut is not None else img).reshape(-1, 3))
                     break
     return np.concatenate(px).astype(np.float32)
@@ -2220,8 +2348,8 @@ def shot_grade(f, a, n, lut):
     for fr in c.decode(st):
         i = int(round(float(fr.pts * st.time_base) * f.fps))
         while want and i >= want[0]:
-            img = fr.reformat(width=w, height=h, format='rgb24', src_colorspace='itu709', dst_colorspace='itu709',
-                              src_color_range='MPEG', dst_color_range='JPEG').to_ndarray()
+            img = pix.ndarray(fr, width=w, height=h, format='rgb24', src_colorspace='itu709', dst_colorspace='itu709',
+                              src_color_range='MPEG', dst_color_range='JPEG')
             img = lut(img) if lut is not None else img
             if getattr(f, 'match', None) is not None:
                 img = apply_match(img, f.match)
@@ -2257,9 +2385,14 @@ def apply_grade(img, g):
 
 
 def grade_all(scenes, flights, lut):
-    """--grade auto: every shot's levels and white balance (x['grade'], keys through the shot)."""
-    for x in (x for s in scenes for x in s['shots']):
-        x['grade'] = shot_grade(flights[x['flight']], x['src_frame'], x['src_frames'], lut)
+    """--grade auto: every shot's levels and white balance (x['grade'], keys through the shot); the shots' frames
+    are read four at a time (the decoder lets go of the GIL)."""
+    from concurrent.futures import ThreadPoolExecutor
+    shots = [x for s in scenes for x in s['shots']]
+    with ThreadPoolExecutor(4) as ex:
+        grades = list(ex.map(lambda x: shot_grade(flights[x['flight']], x['src_frame'], x['src_frames'], lut), shots))
+    for x, gr in zip(shots, grades):
+        x['grade'] = gr
     g = np.array([k[1:] for s in scenes for x in s['shots'] for k in x['grade']])
     moving = sum(1 for s in scenes for x in s['shots'] if len(x['grade']) > 1)
     print(f'  grade: black in {g[:, 0].min():.0f}..{g[:, 0].max():.0f}, gain r {g[:, 1].min():.2f}..{g[:, 1].max():.2f} '
@@ -2335,7 +2468,7 @@ def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=No
                     break
                 cur = int(round(float(fr.pts * st.time_base) * f.fps))
                 if cur >= lo or not got:
-                    got[cur] = fr.reformat(**to_rgb).to_ndarray()[zy:zy + H, zx:zx + W]
+                    got[cur] = pix.ndarray(fr, **to_rgb)[zy:zy + H, zx:zx + W]
             got = {i: im for i, im in got.items() if i >= lo or i == max(got)}
             a_ = got[min((i for i in got if i >= lo), default=max(got))]
             b_ = got[min((i for i in got if i >= hi), default=max(got))]
@@ -2358,14 +2491,17 @@ def render(scenes, flights, m, out, height, fps_out, debug=False, crf=23, lut=No
                 bi = np.searchsorted(beats, t + 0.5 / fps_out) - 1
                 if bi >= 0 and t - beats[bi] < 0.08:
                     cv2.circle(o, (W - 24, 24), 14 if (bi - d0) % 4 == 0 else 7, (255, 0, 0), -1)
-            vf = av.VideoFrame.from_ndarray(np.ascontiguousarray(o), format='rgb24').reformat(
-                format='yuv420p', src_colorspace='itu709', dst_colorspace='itu709',
-                src_color_range='JPEG', dst_color_range='MPEG')
+            vf = pix.reformat(av.VideoFrame.from_ndarray(np.ascontiguousarray(o), format='rgb24'),
+                              format='yuv420p', src_colorspace='itu709', dst_colorspace='itu709',
+                              src_color_range='JPEG', dst_color_range='MPEG')
             vf.pts = k
             for p in vs.encode(vf):
                 oc.mux(p)
             k += 1
-        print(f'\r  render {k / fps_out:6.1f}/{dur:.1f}s  ({time.time() - t_start:.0f}s)', end='', flush=True)
+        if sys.stdout.isatty():                                  # progress for a person; a log gets the last line
+            print(f'\r  render {k / fps_out:6.1f}/{dur:.1f}s  ({time.time() - t_start:.0f}s)', end='', flush=True)
+    if not sys.stdout.isatty():
+        print(f'  render {k / fps_out:.1f}s in {time.time() - t_start:.0f}s', end='')
     for p in vs.encode(None):
         oc.mux(p)
     oc.close()
@@ -2400,6 +2536,16 @@ def make_parser():
     ap.add_argument('--no-ramps', action='store_true', help='constant speed inside shots')
     ap.add_argument('--debug', action='store_true', help='overlay shot info and a beat flash')
     ap.add_argument('--plan-only', action='store_true')
+    ap.add_argument('--brief', action='store_true',
+                    help='no footage table (montage.py prints it for the first edit of a run only)')
+    ap.add_argument('--order', type=float, default=0.0,
+                    help='weight of the recording order within a day (W_ORDER), e.g. 4: a scene pays it for footage '
+                         'recorded before a scene placed earlier in the edit on the same day, or after one placed '
+                         'later (day, evening, sunset in that order); default off')
+    ap.add_argument('--seeds', type=int, default=0,
+                    help='plan with this many seeds (--seed and the next ones, else 0, 1, ...) and keep the best '
+                         'by edit_score: piloting, hits met, onsets on beats, variety, look-alikes (people and '
+                         'joins when weighted); one line per seed')
     ap.add_argument('--cache', default=None, help='telemetry cache folder (default: next to the output)')
     ap.add_argument('--proxy-dir', default=None, help='proxy.py output: 480p proxies and image motion features')
     ap.add_argument('--lut', default=None, help='.cube LUT for the picture, e.g. D-Log M -> Rec.709')
@@ -2476,7 +2622,8 @@ def make_parser():
 
 def apply_options(a):
     """The weights and switches of the command line, set where the scoring reads them; -> the noise generator."""
-    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN
+    global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN, W_ORDER
+    W_ORDER = a.order
     SECTIONS[0] = a.sections
     if a.lively:
         if a.sections:
@@ -2555,7 +2702,7 @@ def main():
     base = os.path.splitext(out)[0]
     os.makedirs(os.path.dirname(out), exist_ok=True)
     t0 = time.time()
-    print('footage:')
+    print('footage:' if not a.brief else 'footage: as above', flush=True)
     cache = a.cache or os.path.join(os.path.dirname(out), '.telemetry_cache')
     if a.originals:
         with open(a.originals, encoding='utf-8') as fh:
@@ -2563,7 +2710,7 @@ def main():
     else:
         flights = find_flights(a.footage, cache, a.proxy_dir)
     prepare_flights(flights, a)
-    for f in flights:
+    for f in flights if not a.brief else []:
         kinds = ', '.join(f'{f.trick_kind.count(k)} {k}' for k in EVENT_KINDS
                           if f.trick_kind.count(k))
         print(f'  F{f.idx} {f.name}: {f.n / f.fps:.0f}s, usable {f.usable.mean() * 100:.0f}%, '
@@ -2582,15 +2729,15 @@ def main():
     if a.target:
         music_path = base + '_music.wav'
         edit_info = music_edit.shorten(a.music, music_path, m, [(p, 16, c == 0, int(c)) for p, c in zip(phrases, cls)],
-                                       a.target)
+                                       a.target, F=F_whole)
         print(f'  shortened {m["duration"]:.1f}s -> {edit_info["seconds"]:.1f}s, phrases {edit_info["phrases"]}, '
               f'join cost {edit_info["jump_cost"]:.2f}')
         # the cut is whole phrases of the track from 0 on, so its phrases start where the track's do; found again
         # by loudness jumps, those of a song cut verse -> last chorus sat a bar late (2.2 s, not 0.2): the scene cut
         # came 2 s into the chorus
-        t0 = float(m['beats'][phrases[0]])
+        phrase_t0 = float(m['beats'][phrases[0]])
         m = analyse_music(music_path, a.bpm)
-        m['phrase_t0'] = t0
+        m['phrase_t0'] = phrase_t0
     print(f'  {os.path.basename(music_path)}: {m["duration"]:.1f}s, {m["bpm"]:.2f} BPM, {m["beats"].size} beats, '
           f'downbeat phase {m["downbeat"]}')
     phrases, cls = phrase_layout(m)[:2]
@@ -2600,11 +2747,6 @@ def main():
     print(f'  sections (and energy) per phrase: {" ".join(f"{s}{c}" for s, c in zip(sec, cls))}; chorus '
           + (f'{chorus}' + ('' if chorus in sec else ' (not in the cut)') if chorus else 'none')
           + ('' if music_path == a.music else f'; whole track {"".join(sec_whole)}'))
-    scenes = plan_scenes(m, rng)
-    scenes[-1]['last'] = True
-    if all(hasattr(f, 'day') for f in flights):
-        w, cnt = chapters(scenes, flights)
-        print(f'  chapters (good seconds -> scenes): {", ".join(f"{d}: {w[d]:.0f}s -> {cnt[d]}" for d in cnt)}')
     musts = []
     for spec, last, first in ([(x, False, False) for x in a.must] + ([(a.end, True, False)] if a.end else [])
                               + ([(a.start, False, True)] if a.start else [])):
@@ -2648,35 +2790,26 @@ def main():
         musts.append((f.idx, lo, hi, end_at, first))
     if a.arcs:
         musts += pick_arcs(flights, m, a.arcs, musts)
-    if any(x[4] for x in musts):
-        # the editor's opening piece takes the first phrase: a flying scene or a hero planned there gives way (with
-        # --sections a track's chorus can open it: the first phrase was a flying scene, the pickup stayed a 1 s
-        # scene of another clip and the piece came second, "an off-topic piece for a couple of seconds")
-        first = scenes[1] if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else scenes[0]
-        first['hero'] = first['slow_hero'] = first['fly'] = False
-    short_pickup = scenes[0]['kind'] == 'pickup' and sum(
-        x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] < PICKUP_MIN_S
-    if (any(x[4] for x in musts) or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
-            not (scenes[1]['hero'] or scenes[1]['fly']):
-        # the opening piece opens the edit: the pickup before the first phrase joins that phrase's first shot
-        # (it took the opening shot otherwise, and the piece came second); so does a pickup too short to be a shot
-        p, s1 = scenes[0]['shots'][0], scenes[1]['shots']
-        s1[0] = dict(merged([p, s1[0]]), cls=s1[0]['cls'], speed=s1[0]['speed'], q_music=s1[0]['q_music'])
-        scenes = scenes[1:]
-        for i, s in enumerate(scenes):
-            s['idx'] = i
     avoid = avoided(a.avoid, flights)
     if a.avoid:
         print(f'  footage taken by {len(a.avoid)} earlier edits: '
               f'{sum(b - a_ for v in avoid.values() for a_, b in v) / flights[0].fps:.0f}s')
-    scenes = assign(scenes, flights, m, rng, musts, avoid)
-    if a.no_ramps or (not a.ramps and not HIT_ON[0]):
-        for x in (x for s in scenes for x in s['shots']):
-            constant_speed(x)
-    else:
-        ramp_all(scenes, flights, hits_only=not a.ramps)
-    if END_HIT[0] is not None and scenes[-1].get('must'):
-        land_end(scenes, flights)
+    if not a.seeds:
+        scenes = plan_edit(m, flights, a, rng, musts, avoid)
+    else:                                                        # --seeds N: the best of N plans by edit_score
+        seeds = [(a.seed or 0) + k for k in range(a.seeds)]
+        best = None
+        for seed in seeds:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                sc = plan_edit(m, flights, a, np.random.default_rng(seed), musts, avoid)
+            score, parts = edit_score(sc, flights, m)
+            print(f'  seed {seed}: score {score:.3f}  ' + ', '.join(f'{k} {v}' for k, v in parts.items()), flush=True)
+            if best is None or score > best[0]:
+                best = (score, seed, sc, buf.getvalue())
+        _, a.seed, scenes, text = best
+        print(f'  seed {a.seed} kept:')
+        print(text, end='')
     shots = [x for s in scenes for x in s['shots']]
     sw = sum(1 for p, q in zip(scenes, scenes[1:]) if p['flight'] != q['flight'])
     on, tot = sync_stats(scenes, flights, m)
@@ -2696,6 +2829,10 @@ def main():
           f'hero ramps with a manoeuvre {len(heroes)}/{sum(s["hero"] for s in scenes)}')
     jn = [join(*cut_side(scenes, i, flights, True), *cut_side(scenes, i + 1, flights, False))
           for i in range(len(scenes) - 1)]
+    ts = [(s.get('day'), scene_time(s, flights)) for s in scenes]
+    back = sum(1 for (d, t), (e, u) in zip(ts, ts[1:]) if d == e and t is not None and u is not None and u < t)
+    print(f'  recording order: {back} of {len(scenes) - 1} scene cuts step back in time within a day'
+          + ('' if W_ORDER else ' (--order W asks for the order)'))
     print(f'  scene cuts that match (join over {JOIN_GOOD}): {sum(j > JOIN_GOOD for j in jn)} of {len(jn)}, '
           f'mean join {np.mean(jn) if jn else 0:.2f}' + ('' if W_JOIN else ' (--joins W asks for them)'))
     mv = [x['move'] for x in shots]
@@ -2706,10 +2843,7 @@ def main():
     print(f'  movements: {dict((k, mv.count(k)) for k in MOVES if mv.count(k))}, longest run of one kind {best_run}; '
           f'hero manoeuvres: {[x.get("hero_kind") for x in shots if x.get("hero_ramp")]}; '
           f'opening piloting {np.mean([x["skill"] for x in shots[:3]]):.2f}')
-    lk = [(s['idx'], shot_look(flights[x['flight']], x['src_frame'], x['src_frames'])) for s in scenes for x in s['shots']]
-    lk = [(i, d) for i, d in lk if d is not None]
-    close = sum(1 for k, (i, a) in enumerate(lk) for j, b in lk[k + 1:]
-                if i != j and np.sqrt(((a - b) ** 2).mean()) < LOOK_SIGMA)
+    close = lookalike_pairs(scenes, flights)
     print(f'  look-alike shot pairs across scenes (RMS < {LOOK_SIGMA:.1f}): {close}')
     if WANT:
         got = [kind for x in shots for c, kind in zip(flights[x['flight']].tricks, flights[x['flight']].trick_kind)

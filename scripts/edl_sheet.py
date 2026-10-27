@@ -29,6 +29,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import paths  # noqa: E402
+import pix  # noqa: E402
 
 FW = 240                # frame width on the cut sheet
 PW = 480                # width of the music panel between the frames
@@ -57,7 +58,7 @@ def frames(path, fps, idx):
             c.seek(int(max(fr_i - 2, 0) / fps / st.time_base), stream=st, backward=True)
             im = None
             for fr in c.decode(st):
-                im = fr.to_ndarray(format='bgr24')
+                im = pix.ndarray(fr, format='bgr24')
                 if int(round(float(fr.pts * st.time_base) * fps)) >= fr_i:
                     break
             out.append(im)
