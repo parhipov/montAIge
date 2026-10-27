@@ -7,3 +7,5 @@ LOCAL.md
 __pycache__/
 *.pyc
 .venv*/
+# Claude Code: this machine's permission rules (tool paths)
+.claude/settings.local.json

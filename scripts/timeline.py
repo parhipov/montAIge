@@ -49,16 +49,27 @@ def subject_names(base):
 
 
 def activity_labels(renders, cache):
-    """{render: (frames, label, p)} on the CLIP samples (places.py embed), or {} without them."""
+    """{render: (frames, label, p)} on the CLIP samples: from <render>_activities.npz where places.py activities
+    ran (it carries the job's own --text activities: "welding with sparks" in a factory), else from the general
+    list on the embeddings (places.py embed); {} without either."""
     import places
-    have = [r for r in renders if os.path.exists(os.path.splitext(r)[0] + '_clip.npz')]
-    if not have:
-        return {}
+    out, todo = {}, []
+    for r in renders:
+        a = os.path.splitext(r)[0] + '_activities.npz'
+        if os.path.exists(a):
+            z = np.load(a)
+            texts, p = z['texts'].tolist(), z['p'].astype(np.float32)
+            k = np.argmax(p, 1)
+            best = p[np.arange(len(k)), k]
+            out[r] = (z['frame'], np.where(best >= places.ACT_HIT, np.array(texts, object)[k], 'none'), best)
+        elif os.path.exists(os.path.splitext(r)[0] + '_clip.npz'):
+            todo.append(r)
+    if not todo:
+        return out
     mdl = places.model_of(cache)
     texts = list(places.ACTIVITIES)
     temb = places.text_emb(mdl, texts + places.NOT_ACTIVITY)
-    out = {}
-    for r in have:
+    for r in todo:
         z = np.load(os.path.splitext(r)[0] + '_clip.npz')
         p = places.probs(z['emb'].astype(np.float32), temb, len(texts))
         k = np.argmax(p, 1)
@@ -171,8 +182,9 @@ def build(job_dir, proxy, cache, clip_cache):
         if os.path.exists(base + '_captions.npz'):              # captions.py: the chunk each half second falls in
             z = np.load(base + '_captions.npz', allow_pickle=False)
             cf, ct, chunk = z['frame'], z['text'], float(z['chunk_s'])
-            k = np.clip(np.searchsorted(cf, grid, side='right') - 1, 0, len(cf) - 1)
-            row['caption'] = np.where(grid < cf[k] + chunk * fps, ct[k], None)
+            if cf.size:                                            # a clip shorter than a chunk has no captions
+                k = np.clip(np.searchsorted(cf, grid, side='right') - 1, 0, len(cf) - 1)
+                row['caption'] = np.where(grid < cf[k] + chunk * fps, ct[k], None)
             db.executemany('INSERT INTO captions VALUES (?,?,?,?)',
                            [(clip, round(float(f / fps), 2), round(float(f / fps + chunk), 2), str(t)) for f, t in zip(cf, ct)])
         keys = [c.split()[0].strip('"') for c in cols]

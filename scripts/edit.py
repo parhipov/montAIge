@@ -267,7 +267,9 @@ W_BEAUTY, CINE_VIEW = 0.0, 0.3
 W_PICKED = 0.0
 PICK_WHOLE = 0.8        # an export beside its original this long or longer is the whole flight (ends trimmed)
 CHAPTERS = []           # --chapters N,N,...: scenes per recording day (or --sessions) in date order, instead of
-                        # chapters() sharing them
+                        # chapters() sharing them; --chapters mix: no chapters, the days are one shoot (a concert
+                        # and the workshops of one factory: the band cut in as cutaways anywhere)
+MIX_DAYS = [False]
 THEMES = []             # [(text, scenes allowed)]
 # scene: cuts inside it jump 1..12 s forward; continuity of rotation across them
 GAP_MIN_S, GAP_MAX_S, GAP_STEP_S, W_CONT, W_SAME_SCENE = 1.0, 12.0, 0.2, 1.5, 1.0
@@ -2263,7 +2265,7 @@ def plan_edit(m, flights, a, rng, musts, avoid):
     (assign), speed bent onto the hits. The noise generator rng makes it one of many (--seed, --seeds)."""
     scenes = plan_scenes(m, rng)
     scenes[-1]['last'] = True
-    if all(hasattr(f, 'day') for f in flights):
+    if all(hasattr(f, 'day') for f in flights) and not MIX_DAYS[0]:
         w, cnt = chapters(scenes, flights)
         print(f'  chapters (good seconds -> scenes): {", ".join(f"{d}: {w[d]:.0f}s -> {cnt[d]}" for d in cnt)}')
     if any(x[4] for x in musts):
@@ -2901,6 +2903,9 @@ def make_parser():
     ap.add_argument('--joins', type=float, default=0.0,
                     help='weight of scene cuts that match (W_JOIN): the camera turning on the same way, looking as '
                          'high, as bright and of the same colour across the cut, e.g. 2; default off')
+    ap.add_argument('--skip', action='append', default=[],
+                    help='CLIP:START-END never used (repeatable): a crew member walking into the frame, the singer '
+                         'frontal at the mic when the sound is not his, the legs of the pilot; a --must inside it wins')
     ap.add_argument('--must', action='append', default=[],
                     help='CLIP:SECONDS or CLIP:START-END, a moment or a piece the edit has to show (repeatable); '
                          '--must, --start and --end also take find:TEXT, e.g. "find:a corridor -> a staircase -> '
@@ -2990,7 +2995,8 @@ def make_parser():
                          'beautiful view also excuses a shot with nobody in it in a people edit')
     ap.add_argument('--chapters', default=None,
                     help='scenes per recording day (or session, --sessions) in date order, e.g. 3,2,4,2 (0 leaves a '
-                         'day out); default: in proportion to good flying (and beautiful views with --beauty)')
+                         'day out); default: in proportion to good flying (and beautiful views with --beauty); '
+                         '"mix": no chapters, the days are one shoot (a concert and the workshops of one factory)')
     ap.add_argument('--sessions', type=float, default=0.0,
                     help='clips of one day more than this many hours apart are chapters of their own (the flights '
                          'of the day and of the evening), e.g. 1; default off: a chapter per day')
@@ -3060,7 +3066,8 @@ def apply_options(a):
             CAMERAS.update(json.load(fh))
     if a.speed:
         SKILL_PARTS['speed'], CINE_PARTS['speed'] = a.speed, a.speed / 2
-    CHAPTERS[:] =[int(v) for v in a.chapters.split(',')] if a.chapters else []
+    MIX_DAYS[0] = a.chapters == 'mix'
+    CHAPTERS[:] = [int(v) for v in a.chapters.split(',')] if a.chapters and not MIX_DAYS[0] else []
     END_SET[0] = a.end is not None
     return np.random.default_rng(a.seed) if a.seed is not None else None
 
@@ -3171,6 +3178,16 @@ def main():
     print(f'  sections (and energy) per phrase: {" ".join(f"{s}{c}" for s, c in zip(sec, cls))}; chorus '
           + (f'{chorus}' + ('' if chorus in sec else ' (not in the cut)') if chorus else 'none')
           + ('' if music_path == a.music else f'; whole track {"".join(sec_whole)}'))
+    for spec in a.skip:                                          # --skip: footage never used (a crew member walking
+        stem, sec = spec.rsplit(':', 1)                          # in, the singer frontal at the mic when the sound is
+        f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
+        if f is None:                                            # not his, the pilot's legs); a --must inside it wins
+            raise SystemExit(f'--skip {spec}: no such clip among the flights')
+        lo, hi = (int(round(float(v) * f.fps)) for v in sec.split('-'))
+        f.usable[max(lo, 0):min(hi, f.n)] = False
+        f.cu = csum(f.usable.astype(np.float64))
+    if a.skip:
+        print(f'  skipped: {len(a.skip)} pieces, {sum(float(v.split(":")[-1].split("-")[1]) - float(v.split(":")[-1].split("-")[0]) for v in a.skip):.0f} s')
     musts, heard = [], []                                        # heard: hear:TEXT pieces, for their sound (bites)
     for spec, last, first in ([(x, False, False) for x in a.must] + ([(a.end, True, False)] if a.end else [])
                               + ([(a.start, False, True)] if a.start else [])):

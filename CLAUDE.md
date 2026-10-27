@@ -27,6 +27,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   nothing).
 - Previews first: 640 px, 25 fps is enough to judge. 4K only when asked.
 - Scripts perceive, you decide. Checkers write per-frame numbers to `.npz` and print a few summary lines.
+  A new detector is first run on a clip with the thing and one without, and the two numbers compared, before
+  any tuning or use (a sparks detector counted 200+ warm points a frame in a hall without welding: the lamps).
   Look at pictures only on a WARN, once when a detector meets new footage (`pilot_check.jpg`,
   `passes_check.jpg`, `subject_check.jpg`), and the shot sheet and cut sheet of each edit (`<edit>_sheet.jpg`,
   `<edit>_cuts.jpg`, made by the `qc` step) before handing previews over: one activity filling an edit from
@@ -69,9 +71,12 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   session cost 3.5 times as many tokens as it would on its own. What enters the context is paid for on every
   later step: numbers first (poses, CLIP, `timeline.py`), then one picture to confirm; no progress output or long
   dumps. No `/compact`: a summary loses the exact seconds and the reasons.
-- Searching the footage for a moment ("where does he dance", the jumps, a calm ending with them in view) goes to a
-  subagent with the clips, the tools and the answer wanted (CLIP:SEC ranges, a line each): its frame sheets stay in
-  its context. One edit: 33M tokens, of which the search for one dancing boy ~8.5M in the main context.
+- Finding a moment in the footage (a dance, the jumps, a calm ending with them in view) is a measurement, not a
+  viewing: first the feature that describes the moment, then the script that reads it (most often one exists:
+  activities and captions in words, the timeline's columns, sounds, the owner's exports, close passes), and only
+  then frames: one sheet of the top picks as proof. Never a search by watching, in the main context or by a
+  subagent over frame sheets: it costs the most and answers the least. A subagent only for what no feature
+  describes, and it writes its findings to a file as it goes.
 - A toolkit, not a fixed pipeline: `montage.py` does what every job needs; locations, activities, exports,
   climbs and themes are called when a job asks for them. A one-off can stay a one-off script in the job.
 - The scripts are long (`edit.py` 2900 lines, 40k tokens): to change one, grep for the function and read that
@@ -111,7 +116,7 @@ args = ["--people", "4"]                          # edit.py options of every edi
 name = "coach"
 music = "models/music/tennis/Motivator.mp3"
 bpm = 126
-target = 40                                       # seconds, or "auto" for an edit about one person
+target = 40                                       # seconds, or "auto" for an edit about one person, 0 the whole track
 series = true                                     # keeps the footage of earlier series edits out
 clips = ["GH01043*", "GH010440"]                  # only these clips (names, wildcards): one edit per place
 args = ["--subject", "coach", "--focus",
@@ -144,7 +149,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Music structure: edit.py prints the track's sections per phrase and its chorus (the section that comes back
   loudest); `--sections` puts the heroes and flying scenes on the chorus, the first one first, and with
   `--lively` the 4-beat shots only there.
-- Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1).
+- Variety: `--theme "TEXT[:N]"` (an activity in words, at most N scenes of it, default 1; a scene counts when a
+  shot's probability is 0.4 or more, so a second text catches the thing's dimmer looks, e.g. the dark hall of a
+  lit stage; the editor's pieces are not counted: lower N by the pieces that show the theme, 0 allowed).
 - Scene cuts that match: `--joins W` (e.g. 2: the camera turning on the same way, looking as high, as bright and
   of the same colour across a scene cut; edit.py prints how many match either way).
 - The owner's picks: `--picked W` (clips the owner stabilized themselves: a `_stabilized` export without its
@@ -152,11 +159,14 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Beautiful views: `--beauty W` (off by default; `beauty = [...]` in the job file says what is beautiful in
   words, `beauty.py`; `plain = [...]` what fills the footage without being a view, e.g. snow up close): a
   beautiful view also excuses a shot with nobody in it. A landmark is a theme or a moment.
-- Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty);
+- Days: `--chapters N,N,...` scenes per recording day (by default shared by good flying and beauty; `mix`: no
+  chapters, the days are one shoot: a concert and the workshops of one factory, the band cut in anywhere);
   `--sessions H`: a day's clips more than H hours apart are chapters of their own (the flights by day and the
   evening's), counted by `--chapters`; `--order W` (e.g. 4): scenes in the order of recording within a day (day,
   evening, sunset); edit.py and qc.py count the scene cuts that step back in time. Landings are marked and kept
   for the last scene.
+- Never used: `--skip CLIP:START-END` (a crew member walking into the frame, the singer frontal at the mic when
+  the sound is not his, the pilot's legs; a `--must` inside it wins).
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`), or `cap:TEXT` (what the captions say, job
   `captions = true`: "cap:jumping into the water"); a piece longer than its phrase plays faster, up to 1.7x.
@@ -190,7 +200,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - `sounds.py embed|search`: the clips' own sound in words (laughter, a shout of joy): a carried camera hears
   people, a drone its propellers.
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
-  location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s).
+  location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s; `--text`
+  adds the job's own activities, "welding with sparks", "a crane lifting a load", which the timeline's `activity`
+  column then carries: joined with `people` in view it lists the moments of the job).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
 - `timeline.py out/<job> --sql "SELECT ..."`: every feature in one SQLite table, a row per clip per 0.5 s (speed,
   altitude, rotation, parallax, people and each main character, beauty, activity, the caption of that moment) and

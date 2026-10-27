@@ -79,6 +79,13 @@ renders (same frame count as the original), telemetry from the original.
   (Moonlight Beach) and an upbeat acoustic one, but also an Irish pub tune first and another steel-drum party
   piece 55th: the sound is a better guess than the words, not an answer; the owner still chooses by ear.
 
+- **A performance filmed without sound** (DJI O4 clips carry no audio) could not be aligned to its recording by
+  picture: frame brightness, the brightest pixels (the stage lights) and the frame difference at 50 Hz against
+  the track's loudness, onset and bass envelopes, every lag, tempo stretches 0.98-1.02: peaks of z 5-6 at random
+  lags (the maximum of 18 000 random correlations is ~4.5), one lag only in the first 15 s of a 181 s take (the
+  lights coming on at the intro). The band stays cutaways where sync cannot be read; a sound recording of the
+  room (the goggles' microphone, a phone) would give the offset in one cross-correlation.
+
 ## Telemetry and manoeuvres
 
 - **Attitude.** In DJI's fused frame world up is −Z for `q_cam`. Image-down agrees with world down on
@@ -459,6 +466,9 @@ at the ropes among them. Few and right on purpose: the owner would rather miss s
 - **One edit per place:** an archive of several trips gets an edit per place, each with its own `clips` in the
   job file. The picture alone put four places 5-25 km apart into one group (autumn birches and water everywhere);
   the GPS told them apart.
+- **The job's own activities** (`places.py activities --text ...`, in the timeline's `activity` column) joined
+  with people in view answer "a worker welding, sparks flying" as a list: welding p 0.62 with a worker, the crane
+  0.89, in seconds. The top "welding with sparks" were the stage's cold-spark fountains, told apart by the day.
 - **Light is not a place:** a theme "a sunset over a town" also took a kremlin wall in the low sun for a sunset and
   left that whole flight out; extra sunset scenes were found again in daytime footage with `edl_edit.py
   --replace K --clip CLIP`, choosing the clip whose motion met the same musical hits.
@@ -494,7 +504,8 @@ at the ropes among them. Few and right on purpose: the owner would rather miss s
 
 `timeline.py` builds `out/<job>/timeline.sqlite` from the features after every `features` step: a row per clip
 per half second (GPS speed, altitude and climb, rotation, flow, parallax, brightness, people and each main
-character's size, aesthetics and scenic views, the likeliest activity) and a row per person (track, box, name).
+character's size, aesthetics and scenic views, the likeliest activity, from the job's own `_activities.npz` when
+`places.py activities` ran with the job's texts) and a row per person (track, box, name).
 The npz files stay the source; the index answers questions across them in one query ("where is she in view, with
 a view behind, at speed") instead of a one-off script loading five files onto one time grid. The owner asked
 for it once the information piled up.
