@@ -1947,8 +1947,14 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
     hero_used = set()
     shown = [0] * len(THEMES)                                    # scenes that show each --theme
     ranks = {}                                                   # day -> recording times of its usable footage
+    # the moments not taken yet keep their windows out of every other scene, and a scene with a moment shows it:
+    # each moment was placed alone, and taken in turn a two-shot scene lost the room for its second shot (the
+    # scene taken before it had the footage after the piece), took other footage, and one of its shots was the
+    # last 2.5 s of the ending's piece, which then went missing too
+    pending = {i: sc['must'] for i, sc in enumerate(scenes) if sc.get('must')}
     for i in order:
         sc = scenes[i]
+        pending.pop(i, None)
         nbr = [scenes[j].get('flight') for j in (i - 1, i + 1) if 0 <= j < len(scenes)]
         joins = (cut_side(scenes, i - 1, flights, True), cut_side(scenes, i + 1, flights, False))
         same_day = [j for j, s in enumerate(scenes) if s.get('day') == sc.get('day')]   # its slot among its day's
@@ -1959,33 +1965,62 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
                           if 0 <= j < len(scenes) and scenes[j].get('flight') is not None else None
                           for j in (i - 1, i + 1))
         roles = (i == (1 if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else 0), i == len(scenes) - 1)
-        best = None
-        # the scene's own recording day first; if nothing fits there, the next day, then the previous one
-        days = sorted({getattr(f, 'day', None) for f in flights} - {None})
-        tries = [sc.get('day')]
-        if sc.get('day') in days:
-            d = days.index(sc['day'])
-            tries += [days[j] for j in (d + 1, d - 1, d + 2, d - 2) if 0 <= j < len(days)]
-        for day in tries:
-            for f in flights:
-                if day and getattr(f, 'day', None) != day:
-                    continue
-                if sc.get('must') and sc['must'][0] != f.idx:
-                    continue
-                r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng, look_penalty(f, seen), moves, hero_used,
-                             theme_penalty(f, shown), joins,
-                             order_penalty(day_rank(f, flights, ranks), k_day, K_day) if W_ORDER else None,
-                             sizes, roles)
-                if r is None:
-                    continue
-                score = r[0] - W_SAME_SCENE * sum(1 for x in nbr if x is not None and flights[x].rec == f.rec)
-                if best is None or score > best[0]:
-                    best = (score, f, r[1], r[2])
-            if best is not None:
-                if day != sc.get('day'):
-                    print(f'  scene {i}: nothing fits on {sc.get("day")}, took {day}')
-                    sc['day'] = day
-                break
+
+        def search():
+            """(score, flight, starts, lengths) of the best footage for scene sc, or None."""
+            best, mu = None, sc.get('must')
+            # the scene's own recording day first; if nothing fits there, the next day, then the previous one
+            days = sorted({getattr(f, 'day', None) for f in flights} - {None})
+            tries = [sc.get('day')]
+            if sc.get('day') in days:
+                d = days.index(sc['day'])
+                tries += [days[j] for j in (d + 1, d - 1, d + 2, d - 2) if 0 <= j < len(days)]
+            for day in tries:
+                for f in flights:
+                    if day and getattr(f, 'day', None) != day:
+                        continue
+                    if mu and mu[0] != f.idx:
+                        continue
+                    held = [(lo, hi if e is None else max(hi, e)) for fi, lo, hi, e in pending.values() if fi == f.idx]
+                    r = scene_dp(sc, f, pools, rec_used(f, used, flights) + held, rng, look_penalty(f, seen), moves,
+                                 hero_used, theme_penalty(f, shown), joins,
+                                 order_penalty(day_rank(f, flights, ranks), k_day, K_day) if W_ORDER else None,
+                                 sizes, roles)
+                    if r is None or (mu and not shows(r, mu[1], mu[2], mu[3], f.fps, sc['shots'][-1])):
+                        continue
+                    score = r[0] - W_SAME_SCENE * sum(1 for x in nbr if x is not None and flights[x].rec == f.rec)
+                    if best is None or score > best[0]:
+                        best = (score, f, r[1], r[2])
+                if best is not None:
+                    if day != sc.get('day'):
+                        print(f'  scene {i}: nothing fits on {sc.get("day")}, took {day}')
+                        sc['day'] = day
+                    break
+            return best
+
+        best = search()
+        mu = sc.get('must')
+        if best is None and mu and len(sc['shots']) > 1:
+            # the room the moment had among the scene's shots is taken: the phrase as one shot, as place_moments does
+            f, saved = flights[mu[0]], sc['shots']
+            x = merged(saved)
+            need, have = (mu[2] if mu[3] is None else max(mu[2], mu[3])) - mu[1] + int(PIECE_AIR_S * f.fps), \
+                source_frames(x, f)
+            if need > have:
+                x['speed'] = min(x['speed'] * need / have, max(PIECE_MAX_SPEED, x['speed']))
+            sc['shots'] = [x]
+            best = search()
+            if best is None:
+                sc['shots'] = saved
+            else:
+                print(f'  scene {i}: the moment {f.name} {mu[1] / f.fps:.1f}-{mu[2] / f.fps:.1f}s as one shot '
+                      f'(at {x["speed"]:.2f}x): the scenes taken before it left no room for its shots')
+        if best is None and mu:
+            f = flights[mu[0]]
+            print(f'  WARN scene {i}: the moment {f.name} {mu[1] / f.fps:.1f}-{mu[2] / f.fps:.1f}s cannot be shown '
+                  f'there any more: lost')
+            del sc['must']
+            best = search()
         if best is None:
             usable = sum(float(f.usable.sum()) / f.fps for f in flights)
             raise SystemExit(f'ran out of footage at scene {i}: {usable:.0f} s usable for a {m["duration"]:.0f} s edit '
