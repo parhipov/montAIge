@@ -58,10 +58,13 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
   - beautiful views, on request, with beauty in the job's own words (mountains, a beach);
   - the footage in words: a local vision-language model describes every three seconds ("a man is jumping into
     the water from a boat"), so a moment is found by its words, and looks over every shot of an edit before you
-    see it.
+    see it;
+  - speech, on request: what people say (Whisper) and who says it (voices told apart across all the clips,
+    pyannote), sung or spoken; a voice is nearly a person in view, except the one holding the camera.
 - Editing: shot choice, pacing (a build of shorter shots before a drop, a long one on it), shot sizes that
   alternate, an establishing first shot and a closing last one, how much of the pilot to show, the track, the
-  footage's own sound under the music at a laugh or a splash, dissolves on calm music, a moment in slow motion,
+  footage's own sound under the music at a laugh or a splash, a line someone says heard whole with the music
+  ducked under it, dissolves on calm music, a moment in slow motion,
   two or three variants. You comment on 640 px previews, and the next preview follows the comments.
 - QC: an OK / WARN report for each edit (length, rhythm, people, piloting, repeated activities, dark or
   frozen frames).
@@ -158,14 +161,16 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 
 Requirements: an NVIDIA GPU (tested on an RTX 3050, 8 GB), Python 3.11+, PyTorch with CUDA, ultralytics,
 transformers and accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu for face
-matching only. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage, and
+matching only; speech (optional) in a second environment, `models/venvs/speech` (or `SPEECH_PY`): PyTorch with
+CUDA, pyannote.audio 4 (it wants NumPy 2), transformers, PyAV. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage, and
 with clips with no usable gyro (an Osmo Action 3, exports stabilized elsewhere): their camera motion comes from
 the picture.
 
 Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
 `scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
 face matching only), the LAION aesthetic predictor for CLIP ViT-B/32 (beautiful views only), DJI's D-Log M to
-Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks from
+Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), Whisper large-v3-turbo and pyannote's
+speaker-diarization-community-1 (speech only; the latter is gated on Hugging Face: accept its conditions), tracks from
 [incompetech.com](https://incompetech.com).
 
 ## Scripts
@@ -185,6 +190,7 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 | `captions.py` | the footage in words every 3 s (Qwen3-VL, local), searched by words |
 | `review.py` | the model's line per shot of a finished edit: what it shows, what is wrong with it |
 | `sounds.py` | the clips' own sound in words (CLAP): laughter, a shout, a splash; the sound bites of an edit |
+| `speech.py` | what people say (Whisper) and who says it (pyannote: voices told apart across clips); the phrases an edit lets you hear |
 | `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
 | `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, a named moment put in a shot, the ending taking over, the colour of two cameras matched |
 | `qc.py` | the OK / WARN report |
@@ -208,7 +214,9 @@ Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), tracks f
 - [Gyroflow](https://gyroflow.xyz) (GPL-3.0), run as an external program.
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (AGPL-3.0),
   [CLIP](https://github.com/openai/CLIP) (MIT), SFace from the [OpenCV Model Zoo](https://github.com/opencv/opencv_zoo)
-  (Apache-2.0), the [LAION aesthetic predictor](https://github.com/LAION-AI/aesthetic-predictor) (MIT).
+  (Apache-2.0), the [LAION aesthetic predictor](https://github.com/LAION-AI/aesthetic-predictor) (MIT),
+  [Whisper](https://github.com/openai/whisper) (MIT), [pyannote.audio](https://github.com/pyannote/pyannote-audio)
+  (MIT) with its speaker-diarization-community-1 model (CC BY 4.0).
 - See also [PostFlight](https://github.com/Okhr/postflight): DJI FPV footage from the SD card to stabilized,
   graded clips.
 

@@ -16,12 +16,16 @@ Tables:
           bright, sharp from analyze.py; people (count), people_area (the biggest, share of the frame), facing,
           waving; one column per main character (people.py who / subject: their area, 0 when not in view); aes and
           scenic (beauty.py); activity (the likeliest of places.ACTIVITIES, or 'none') and activity_p; caption
-          (captions.py: what the model said of the 3 s chunk this moment falls in, NULL without captions)
+          (captions.py: what the model said of the 3 s chunk this moment falls in, NULL without captions);
+          voice (speech.py: the voice speaking alone at that moment, V1.., NULL when nobody or two at once), speech
+          (the words of the phrase this moment falls in) and sung (1 when that phrase is sung, speech.sung)
   people  one row per person row of people.py detect: clip, t, frame, track (people.py track, else -1), x, y, w,
           h (centre and size, shares of the frame), area, facing, waving, name (main character or NULL)
   captions  one row per captioned chunk: clip, t0, t1, text; captions_fts (FTS5) searches the words:
           SELECT clip, t0, text FROM captions_fts JOIN captions ON captions.rowid = captions_fts.rowid
           WHERE captions_fts MATCH 'jump*'
+  phrases   one row per phrase of speech.py: clip, t0, t1, voice, sung (CLAP margin, sung over speech.SUNG_OVER),
+          snr (dB over what is heard around it), level (dBFS), text; phrases_fts searches the words as captions_fts
 """
 import argparse
 import glob
@@ -82,6 +86,7 @@ def activity_labels(renders, cache):
 def build(job_dir, proxy, cache, clip_cache):
     import av
     import edit
+    import speech
     with open(os.path.join(job_dir, 'originals.txt'), encoding='utf-8') as fh:
         srcs = [x.strip() for x in fh if x.strip()]
     renders = [os.path.join(proxy, os.path.splitext(os.path.basename(s))[0] + '_stabilized.mp4') for s in srcs]
@@ -97,14 +102,18 @@ def build(job_dir, proxy, cache, clip_cache):
                'fps REAL, gps REAL, lat REAL, lon REAL, alt_min REAL, alt_max REAL, speed_p50 REAL)')
     cols = ['clip TEXT', 't REAL', 'frame INTEGER', 'speed REAL', 'alt REAL', 'climb REAL', 'rot REAL', 'flow REAL',
             'parallax REAL', 'bright REAL', 'sharp REAL', 'people INTEGER', 'people_area REAL', 'facing INTEGER',
-            'waving INTEGER', 'aes REAL', 'scenic REAL', 'activity TEXT', 'activity_p REAL', 'caption TEXT'] + \
+            'waving INTEGER', 'aes REAL', 'scenic REAL', 'activity TEXT', 'activity_p REAL', 'caption TEXT',
+            'voice TEXT', 'speech TEXT', 'sung INTEGER'] + \
         [f'"{n}" REAL' for n in names]
     db.execute(f'CREATE TABLE t ({", ".join(cols)})')
     db.execute('CREATE TABLE people (clip TEXT, t REAL, frame INTEGER, track INTEGER, x REAL, y REAL, w REAL, h REAL, '
                'area REAL, facing INTEGER, waving INTEGER, name TEXT)')
     db.execute('CREATE TABLE captions (clip TEXT, t0 REAL, t1 REAL, text TEXT)')
+    db.execute('CREATE TABLE phrases (clip TEXT, t0 REAL, t1 REAL, voice TEXT, sung REAL, snr REAL, level REAL, '
+               'text TEXT)')
     try:                                                         # word search: SELECT ... FROM captions_fts WHERE
         db.execute('CREATE VIRTUAL TABLE captions_fts USING fts5(clip, text, content=captions)')   # captions_fts MATCH 'jump*'
+        db.execute('CREATE VIRTUAL TABLE phrases_fts USING fts5(clip, text, content=phrases)')
         fts = True
     except sqlite3.OperationalError:
         fts = False
@@ -187,6 +196,18 @@ def build(job_dir, proxy, cache, clip_cache):
                 row['caption'] = np.where(grid < cf[k] + chunk * fps, ct[k], None)
             db.executemany('INSERT INTO captions VALUES (?,?,?,?)',
                            [(clip, round(float(f / fps), 2), round(float(f / fps + chunk), 2), str(t)) for f, t in zip(cf, ct)])
+        sp = speech.load(r)
+        if sp:                                                   # speech.py: who speaks alone, the phrase's words
+            voice, words, sung = (np.full(len(grid), None, object) for _ in range(3))
+            for a, b, k in sp.get('exclusive', []):
+                voice[(tt >= a) & (tt < b)] = sp['speakers'].get(k, {}).get('voice')
+            for ph in sp['phrases']:
+                sel = (tt >= ph['t0']) & (tt < ph['t1'])
+                words[sel], sung[sel] = ph['text'], int(speech.sung(ph))
+            row.update(voice=voice, speech=words, sung=sung)
+            db.executemany('INSERT INTO phrases VALUES (?,?,?,?,?,?,?,?)', [
+                (clip, ph['t0'], ph['t1'], ph.get('voice'), ph.get('sung'), ph.get('snr'), ph.get('level'),
+                 ph['text']) for ph in sp['phrases']])
         keys = [c.split()[0].strip('"') for c in cols]
         data = []
         for i in range(len(grid)):
@@ -209,13 +230,16 @@ def build(job_dir, proxy, cache, clip_cache):
     db.execute('CREATE INDEX people_clip ON people (clip, t)')
     if fts:
         db.execute("INSERT INTO captions_fts(captions_fts) VALUES ('rebuild')")
+        db.execute("INSERT INTO phrases_fts(phrases_fts) VALUES ('rebuild')")
     db.commit()
     nt = db.execute('SELECT COUNT(*) FROM t').fetchone()[0]
     npl = db.execute('SELECT COUNT(*) FROM people').fetchone()[0]
     ncap = db.execute('SELECT COUNT(*) FROM captions').fetchone()[0]
+    nph = db.execute('SELECT COUNT(*) FROM phrases').fetchone()[0]
     db.close()
     os.replace(tmp, dst)
-    print(f'timeline: {len(pairs)} clips, {nt} half seconds, {npl} people rows, {ncap} captions, main characters: '
+    print(f'timeline: {len(pairs)} clips, {nt} half seconds, {npl} people rows, {ncap} captions, {nph} phrases, '
+          f'main characters: '
           f'{", ".join(names) or "none"} -> {dst}')
 
 

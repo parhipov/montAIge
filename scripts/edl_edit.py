@@ -271,6 +271,17 @@ def replace(e, ks, o, cache, clip=None):
     return dict(e, scenes=out)
 
 
+def kept_bites(e, ks, from_t=None):
+    """The EDL's bites (the clips' own sound: a laugh, a phrase of speech) outside the scenes ks and before
+    from_t: a changed scene no longer shows what its bite sounds."""
+    span = [(e['scenes'][k]['shots'][0]['t0'], e['scenes'][k]['shots'][-1]['t1']) for k in ks]
+    out = [b for b in e.get('bites') or [] if all(b['t1'] <= a or b['t0'] >= c for a, c in span)
+           and (from_t is None or b['t1'] <= from_t)]
+    if len(out) < len(e.get('bites') or []):
+        print(f'sound bites dropped with the changed scenes: {len(e["bites"]) - len(out)}, kept {len(out)}')
+    return out
+
+
 def render_edl(e, out, height=480, fps=25):
     """edit.py's preview of an EDL: the proxies the EDL names, its music, LUT, grade and zoom."""
     flights = {}
@@ -282,7 +293,8 @@ def render_edl(e, out, height=480, fps=25):
     m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     m['path'] = e['music']
     lut = edit.CubeLUT(e['lut']) if e.get('lut') else None
-    edit.render(e['scenes'], flights, m, out, height, fps, lut=lut, zoom=e.get('zoom') or 1.0)
+    edit.render(e['scenes'], flights, m, out, height, fps, lut=lut, zoom=e.get('zoom') or 1.0,
+                bites=e.get('bites') or ())
 
 
 def main():
@@ -319,6 +331,7 @@ def main():
     if a.put:
         k, j = (int(v) for v in a.put[0].split('.'))
         e2 = put(e, k, j, a.put[1], a.cache)
+        e2['bites'] = kept_bites(e, [k])
         e2['edl_edit'] = dict(from_edl=a.edl, put=a.put)
     elif a.match:
         e2 = match(e, a.match, a.cache)
@@ -331,12 +344,14 @@ def main():
         if a.seed is not None:
             o.seed = a.seed
         e2 = replace(e, set(a.replace), o, a.cache, a.clip)
+        e2['bites'] = kept_bites(e, sorted(set(a.replace)))
         e2['edl_edit'] = dict(from_edl=a.edl, replace=a.replace, clip=a.clip, seed=a.seed)
     else:
         k = a.end_from
         if not 0 < k < len(e['scenes']) - 1:
             raise SystemExit(f'--end-from {k}: scenes 1..{len(e["scenes"]) - 2}')
         e2, end = end_from(e, k)
+        e2['bites'] = kept_bites(e, [], e['scenes'][k]['shots'][0]['t0'])
         if end is not None:                                      # the track ends with the picture, faded out
             x, rate = read_audio(e['music'])
             n = int(round(end * rate))

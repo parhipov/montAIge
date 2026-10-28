@@ -25,6 +25,12 @@ paths in it); the job's name is its folder (or `name = ...`):
     captions = false                         # every 3 s of each render in words by a local vision-language model
                                              # (captions.py: cap:TEXT pieces, the timeline's caption column) and
                                              # the model's review of every shot in `qc` (review.py)
+    speech = "ru"                            # what people say and who says it (speech.py: Whisper, pyannote; the
+                                             # footage's language, or true to let Whisper find it): say:TEXT
+                                             # pieces, the timeline's speech and voice columns, out/<job>/voices/;
+                                             # --talk N only in the args of an edit that asks for it. Runs in a
+                                             # venv of its own (pyannote wants numpy 2): `speech_py`, SPEECH_PY
+                                             # or models/venvs/speech
     beauty = ["mountains", "a canyon"]       # beautiful views in words (beauty.py), for edit.py --beauty W
     plain = ["snow up close"]                # what fills this footage without being a view (beauty.py --plain)
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py; square
@@ -118,10 +124,10 @@ def short_cmd(cmd):
     return ' '.join(out)
 
 
-def run(args, log=None):
-    """A step's script with this Python; its output to the console (or a log file); the echo ends with the time
-    the step took."""
-    cmd = [sys.executable] + [str(a) for a in args]
+def run(args, log=None, py=None):
+    """A step's script with this Python (or py); its output to the console (or a log file); the echo ends with
+    the time the step took."""
+    cmd = [py or sys.executable] + [str(a) for a in args]
     print('  $ ' + short_cmd(cmd), end='' if log else '\n', flush=True)
     t0 = time.time()
     if log:
@@ -382,6 +388,22 @@ def features(job, out, proxy, cache):
     if job.get('sounds', False):                                 # the clips' own sound in words (hear:TEXT pieces)
         run([os.path.join(HERE, 'sounds.py'), 'embed', '--list', os.path.join(out, 'originals.txt'),
              '--proxy-dir', proxy], log)
+    if job.get('speech'):                                        # what people say, who says it (speech.py)
+        own = [os.path.join(MODELS, 'venvs', 'speech', *x) for x in (('Scripts', 'python.exe'), ('bin', 'python'))]
+        py = job.get('speech_py') or os.environ.get('SPEECH_PY') or next((x for x in own if os.path.exists(x)), None)
+        if not py:
+            raise SystemExit('speech = ... needs its venv (pyannote.audio 4, README): models/venvs/speech, '
+                             'SPEECH_PY or `speech_py`')
+        lang = job['speech'] if isinstance(job['speech'], str) else None
+        run([os.path.join(HERE, 'speech.py'), 'run', '--list', os.path.join(out, 'originals.txt'), '--proxy-dir', proxy,
+             '--out', out] + (['--language', lang] if lang else []), log, py=py)
+        vj = os.path.join(out, 'voices.json')
+        if os.path.exists(vj):
+            with open(vj, encoding='utf-8') as fh:
+                vs = json.load(fh)['voices']
+            print(f'  voices: {len(vs)}' + ''.join(f', {k} {v["talk"]:.0f}s in {len(v["clips"])} clips'
+                                                   for k, v in list(vs.items())[:6]) +
+                  f' (out/{os.path.basename(out)}/voices/, transcript.txt)')
     if job.get('beauty'):                                        # beautiful views in the job's words (edit.py --beauty)
         run([os.path.join(HERE, 'beauty.py')] + renders + [x for t in job['beauty'] for x in ('--text', t)] +
             [x for t in job.get('plain', []) for x in ('--plain', t)] +

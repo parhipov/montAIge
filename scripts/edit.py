@@ -19,8 +19,9 @@ x1.3 facing the camera, x1.6 waving; the pilot is rationed), variety (movement k
 adds seeded noise for another variant.
 
 Editor's input: --must / --start / --end CLIP:SEC or CLIP:START-END (or find:TEXT through places.py, hear:TEXT
-through sounds.py) put a
-moment or a piece in the edit; a piece longer than its phrase plays faster, up to PIECE_MAX_SPEED. --fly N:
+through sounds.py, say:TEXT through speech.py) put a
+moment or a piece in the edit; a piece longer than its phrase plays faster, up to PIECE_MAX_SPEED (a say: piece
+never: its words stay on the lips). --talk N: N phrases of the footage's speech with their own sound. --fly N:
 flying scenes built around a manoeuvre on the biggest music lifts. --heroes N with --ramps: the classic ramp
 (rush in, the manoeuvre slow, back to speed). --want KIND, --arcs N: climbs and up-and-down arcs. A series
 from one shoot: --avoid EDL, --subject / --minor / --focus / --peers for edits about one person.
@@ -34,6 +35,7 @@ import glob
 import io
 import json
 import os
+import re
 import sys
 import time
 
@@ -1056,7 +1058,7 @@ def finish_flights(out):
              for i, j in ij]
         LOOK_SIGMA = LOOK_SIGMA_FRAC * float(np.median(d))
     allh = np.concatenate([f.peak_heights for f in out])
-    ref = np.percentile(allh, 75)
+    ref = np.percentile(allh, 75) if allh.size else 1.0          # a camera on a tripod has no motion peaks at all
     ranks = {}
     for k in ('parallax', 'lean', 'rotation', 'jerk', 'speed'):
         vals = [f.raw_skill_parts().get(k) for f in out]
@@ -1929,10 +1931,19 @@ def place_moments(scenes, flights, musts, pools, used, rng):
     """Editor's moments: each goes to the free scene where it scores best without the bonus (the last scene
     for --end, the earliest that can show it for --start); the scene is then planned in that clip only.
     A piece longer than the scene's shots gets the whole phrase as one shot, played faster (up to
-    PIECE_MAX_SPEED) when even the phrase is shorter than the piece."""
-    for mu in sorted(musts, key=lambda x: (x[3] is None, not x[4])):
+    PIECE_MAX_SPEED) when even the phrase is shorter than the piece. With --order the moments of a day keep the
+    order they were recorded in (a play told in its lines): each goes between the scenes of the moments recorded
+    before and after it, wherever it can."""
+    def when_of(mu):
+        g = flights[mu[0]]
+        w = getattr(g, 'when', None)
+        return (getattr(g, 'day', None), w.timestamp() + mu[1] / g.fps) if w is not None else (None, None)
+
+    placed = []                                                  # (day, recording time, scene) of those placed
+    for mu in sorted(musts, key=lambda x: (x[3] is None, not x[4], (when_of(x)[1] or 0) if W_ORDER else 0)):
         fi, lo, hi, end_at, first = mu[:5]
         fixed = mu[5] if len(mu) > 5 else None                   # CLIP:SEC@0.5: shown at that speed
+        talk = len(mu) > 6 and mu[6]                             # a say: piece: at 1x or not in this scene
         f, last = flights[fi], end_at is not None
         span = (max(hi, end_at) if last else hi) - lo            # an --end moment runs on to end_at
         if last and len(scenes) > 2:
@@ -1952,6 +1963,11 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         own = [i for i in free if scenes[i].get('day') in (None, getattr(f, 'day', None))]
         if own and not first:
             free = own
+        day, t = when_of(mu)
+        if W_ORDER and t is not None:                            # between the moments recorded before and after
+            a_ = max((k for d, u, k in placed if d == day and u < t), default=-1)
+            b_ = min((k for d, u, k in placed if d == day and u > t), default=len(scenes))
+            free = [i for i in free if a_ < i < b_] or free
         best = None
 
         def trial(i, whole):
@@ -1967,7 +1983,7 @@ def place_moments(scenes, flights, musts, pools, used, rng):
                 need, have = span + int(PIECE_AIR_S * f.fps), source_frames(x, f)
                 if len(scenes[i]['shots']) == 1 and need <= have:
                     return                                       # the same single shot again
-                if need > have:
+                if need > have and not talk:
                     x['speed'] = min(x['speed'] * need / have, max(PIECE_MAX_SPEED, x['speed']))
                 elif first and need >= PIECE_MIN_SPEED * have:
                     # an opening piece a little shorter than the opening phrase fills it a little slower: a 12 s
@@ -2007,6 +2023,7 @@ def place_moments(scenes, flights, musts, pools, used, rng):
                      len(sh_) - 1 if last else 0) if best[2] is None else 0
             sh_[k]['speed'], sh_[k]['fixed_speed'] = (fixed if best[2] is None else sh_[k]['speed']), True
         scenes[best[1]]['must'] = (fi, lo, hi, end_at)
+        placed.append((day, t, best[1]))
         if scenes[best[1]].get('day') and getattr(f, 'day', None):
             scenes[best[1]]['day'] = f.day                       # an opening or an ending of another day
         sp = f' at {best[2]["speed"]:.2f}x' if best[2] is not None and best[2]['speed'] > BASE_SPEED[0] + 0.01 else ''
@@ -2602,6 +2619,50 @@ BITE_TEXTS = ['people laughing', 'a person shouting with joy', 'water splashing'
               'a dog barking', 'a child squealing with delight']
 BITE_MARGIN, BITE_GAP_S, BITE_S = 0.05, 8.0, 2.5
 BITE_FADE_S, BITE_RAMP_S, BITE_DUCK, BITE_LEVEL, BITE_MAX_GAIN = 0.25, 0.3, 0.3, 1.0, 30.0
+# say:TEXT and --talk N: a phrase of the footage's speech with its own sound (speech.py, job speech = ...). The
+# piece is the phrase with SAY_PAD_S around its words, shown at 1x (the words stay on the lips; never sped up to
+# fit the music's phrase); the music ducks to --duck under it (0: the music only in the gaps between the words)
+# with BITE_RAMP_S ramps; the voice comes in at SAY_LEVEL of the whole track's level, faded SAY_FADE_S.
+# --talk N picks the phrases itself: spoken, not sung; SAY_MIN_S to SAY_MAX_S long with SAY_MIN_WORDS words or
+# more; one voice (two at once under SAY_OVERLAP of it); clear (SAY_MIN_SNR dB over what is heard around it);
+# in usable footage, outside earlier edits of a series. Clearer first, an exclamation or a question a little
+# more, then a voice or a clip already picked a little less; SAY_GAP_S apart within a clip.
+SAY_PAD_S, SAY_FADE_S, SAY_DUCK, SAY_LEVEL = 0.15, 0.06, 0.15, 1.0
+SAY_MIN_S, SAY_MAX_S, SAY_MIN_WORDS, SAY_OVERLAP, SAY_MIN_SNR, SAY_GAP_S = 1.2, 7.0, 3, 0.3, 6.0, 20.0
+
+
+def pick_talk(flights, n, musts, avoid):
+    """--talk N: the phrases of the footage's speech worth hearing (the rules above) -> [(flight, t0, t1, text,
+    voice, score)], at most n."""
+    import speech
+    cands = []
+    for f in flights:
+        d = speech.load(f.stab)
+        for ph in (d or {}).get('phrases', []):
+            if (speech.sung(ph) or not SAY_MIN_S <= ph['t1'] - ph['t0'] <= SAY_MAX_S
+                    or len(ph['words']) < SAY_MIN_WORDS or ph['overlap'] > SAY_OVERLAP
+                    or ph.get('snr', 0) < SAY_MIN_SNR):
+                continue
+            lo, hi = int((ph['t0'] - SAY_PAD_S) * f.fps), int((ph['t1'] + SAY_PAD_S) * f.fps) + 1
+            if lo < 0 or hi > f.n or f.usable[lo:hi].mean() < 0.8 or \
+                    any(mu[0] == f.idx and lo < mu[2] and hi > mu[1] for mu in musts) or \
+                    any(lo < b and hi > a_ for a_, b in avoid.get(f.idx, [])):
+                continue
+            cands.append((min(ph['snr'], 30) / 30 + (0.2 if re.search(r'[!?]', ph['text']) else 0.0), f, ph))
+    out = []
+    while len(out) < n:
+        best = None
+        for sc, f, ph in cands:
+            if any(g is f and abs(p['t0'] - ph['t0']) < SAY_GAP_S for g, p, _ in out):
+                continue
+            sc -= 0.3 * sum(1 for _, p, _ in out if ph.get('voice') and p.get('voice') == ph['voice']) + \
+                0.15 * sum(1 for g, _, _ in out if g is f)
+            if best is None or sc > best[0]:
+                best = (sc, f, ph)
+        if best is None:
+            break
+        out.append((best[1], best[2], best[0]))
+    return [(f, ph['t0'], ph['t1'], ph['text'], ph.get('voice'), sc) for f, ph, sc in out]
 
 
 def out_time(x, src_frame):
@@ -2622,25 +2683,30 @@ def bite_of(x, f, si, s0, s1, what, p=1.0):
                 clip=f.src, what=what, p=round(float(p), 2))
 
 
-def find_bites(scenes, flights, n_max, m, heard=()):
-    """The bites of an edit: the hear:TEXT pieces (heard: (flight idx, first frame, last frame, text)), then the
-    best moments of BITE_TEXTS in the shots' footage (sounds.py's embeddings, <render>_clap.npz) up to n_max."""
+def find_bites(scenes, flights, n_max, m, heard=(), said=(), duck=SAY_DUCK):
+    """The bites of an edit: the hear:TEXT pieces (heard: (flight idx, first frame, last frame, text)) and the
+    say: ones (said: the same; the music ducked to `duck` under them), then the best moments of BITE_TEXTS in the
+    other shots' footage (sounds.py's embeddings, <render>_clap.npz) up to n_max."""
     import sounds
     shots = [x for s in scenes for x in s['shots']]
     dur = m['duration']
     out = []
-    for fi, lo, hi, text in heard:
-        for si, x in enumerate(shots):
-            if x['flight'] == fi and x['src_frame'] <= hi and x['src_frame'] + x['src_frames'] >= lo:
+    for fi, lo, hi, text, talk in [h + (False,) for h in heard] + [h + (True,) for h in said]:
+        for si, x in enumerate(shots):                           # a phrase only under the shot that holds it whole
+            a_, b_ = x['src_frame'], x['src_frame'] + x['src_frames']
+            if x['flight'] == fi and (a_ <= lo and b_ >= hi if talk else a_ <= hi and b_ >= lo):
                 b = bite_of(x, flights[fi], si, lo / flights[fi].fps, hi / flights[fi].fps, text)
                 if b is not None:
+                    if talk:
+                        b.update(talk=True, duck=duck, fade=SAY_FADE_S)
                     out.append(b)
                 break
     cands, temb = [], None
     for si, x in enumerate(shots):
         f = flights[x['flight']]
         p = sounds.cache_path(f.stab)
-        if not n_max or not os.path.exists(p) or (x.get('fixed_speed') and x['speed'] < SLOW_BLEND):
+        if not n_max or not os.path.exists(p) or (x.get('fixed_speed') and x['speed'] < SLOW_BLEND) or \
+                any(b['shot'] == si for b in out):
             continue
         z = np.load(p)
         t, emb = z['t'], z['emb'].astype(np.float32)
@@ -2676,6 +2742,7 @@ def mix_audio(music_path, bites, sr=48000):
     y = music_edit.read_stereo(music_path, sr)
     n = y.shape[1]
     duck, over, tracks = np.ones(n), np.zeros(n), {}
+    whole = np.sqrt(np.mean(y ** 2) + 1e-9)                      # a voice comes in at the track's level
     for b in bites:
         if b['clip'] not in tracks:
             tracks[b['clip']] = sounds.audio(b['clip'])
@@ -2687,16 +2754,16 @@ def mix_audio(music_path, bites, sr=48000):
         seg = a[max(s0, 0):min(s1, a.size)].astype(np.float64)
         seg = np.interp(np.linspace(0, seg.size - 1, i1 - i0), np.arange(seg.size), seg)
         env = np.ones(i1 - i0)
-        k = max(min(int(BITE_FADE_S * sr), (i1 - i0) // 2), 1)
+        k = max(min(int(b.get('fade', BITE_FADE_S) * sr), (i1 - i0) // 2), 1)
         env[:k], env[-k:] = np.linspace(0, 1, k), np.linspace(1, 0, k)
-        gain = min(BITE_LEVEL * np.sqrt(np.mean(y[:, i0:i1] ** 2) + 1e-9) / np.sqrt(np.mean(seg ** 2) + 1e-9),
-                   BITE_MAX_GAIN)
+        ref = SAY_LEVEL * whole if b.get('talk') else BITE_LEVEL * np.sqrt(np.mean(y[:, i0:i1] ** 2) + 1e-9)
+        gain = min(ref / np.sqrt(np.mean(seg ** 2) + 1e-9), BITE_MAX_GAIN)
         over[i0:i1] += seg * env * gain
-        r = max(int(BITE_RAMP_S * sr), 1)
+        r, low = max(int(BITE_RAMP_S * sr), 1), b.get('duck', BITE_DUCK)
         curve = np.ones(n)
-        curve[i0:i1] = BITE_DUCK
-        curve[max(i0 - r, 0):i0] = np.linspace(1, BITE_DUCK, min(r, i0))
-        curve[i1:min(i1 + r, n)] = np.linspace(BITE_DUCK, 1, min(r, n - i1))
+        curve[i0:i1] = low
+        curve[max(i0 - r, 0):i0] = np.linspace(1, low, min(r, i0))
+        curve[i1:min(i1 + r, n)] = np.linspace(low, 1, min(r, n - i1))
         duck = np.minimum(duck, curve)
     return np.clip(y * duck + over[None, :], -1, 1)
 
@@ -2910,7 +2977,9 @@ def make_parser():
                     help='CLIP:SECONDS or CLIP:START-END, a moment or a piece the edit has to show (repeatable); '
                          '--must, --start and --end also take find:TEXT, e.g. "find:a corridor -> a staircase -> '
                          'a tennis court" (places.py: the best stretch, or the best route through the places), and '
-                         'hear:TEXT, e.g. "hear:people laughing" (sounds.py: the best moment of the clips\' sound)')
+                         'hear:TEXT, e.g. "hear:people laughing" (sounds.py: the best moment of the clips\' sound), '
+                         'and say:TEXT, e.g. "say:who wants an apple" (speech.py: the phrase that says it, at 1x '
+                         'with its own sound; say:CLIP:START-END: that stretch of speech)')
     ap.add_argument('--end', default=None, help='CLIP:SECONDS or CLIP:START-END, what the last shot shows')
     ap.add_argument('-o', '--out', required=True)
     ap.add_argument('--target', type=float, default=None, help='shorten the track to about this many seconds')
@@ -2926,6 +2995,11 @@ def make_parser():
                     help='the footage\'s own sound under the music at up to this many moments (a laugh, a shout, a '
                          'splash, a crash: BITE_TEXTS on sounds.py\'s embeddings, job sounds = true); a hear:TEXT '
                          'piece always gets its sound')
+    ap.add_argument('--talk', type=int, default=0,
+                    help='this many phrases of the footage\'s speech with their own sound, the music ducked under '
+                         'them (speech.py, job speech = ...; picked by SAY_* above)')
+    ap.add_argument('--duck', type=float, default=SAY_DUCK,
+                    help='the music\'s level under speech (say: pieces, --talk), 0..1; 0: the music only in the gaps')
     ap.add_argument('--dissolve', type=float, default=0.0,
                     help='seconds of a cross-dissolve into each scene (calm music), except onto a musical hit or '
                          'into a hero or flying scene; default hard cuts')
@@ -3188,10 +3262,10 @@ def main():
         f.cu = csum(f.usable.astype(np.float64))
     if a.skip:
         print(f'  skipped: {len(a.skip)} pieces, {sum(float(v.split(":")[-1].split("-")[1]) - float(v.split(":")[-1].split("-")[0]) for v in a.skip):.0f} s')
-    musts, heard = [], []                                        # heard: hear:TEXT pieces, for their sound (bites)
+    musts, heard, said = [], [], []                              # hear:TEXT and say: pieces, for their sound (bites)
     for spec, last, first in ([(x, False, False) for x in a.must] + ([(a.end, True, False)] if a.end else [])
                               + ([(a.start, False, True)] if a.start else [])):
-        fixed = None                                             # CLIP:SEC@0.5: the piece at that speed (slow motion)
+        fixed, talk = None, None                                 # CLIP:SEC@0.5: the piece at that speed (slow motion)
         head, sep, tail = spec.rpartition('@')
         if sep and tail.replace('.', '', 1).isdigit():
             spec, fixed = head, float(tail)
@@ -3224,6 +3298,22 @@ def main():
             spec = f'{f.name}:{t0_:.1f}-{t1_:.1f}'
             print(f'  heard {spec} (p {pr:.2f})')
             heard.append((f.idx, int(round(t0_ * f.fps)), int(round(t1_ * f.fps)), spec_text))
+        elif spec.startswith('say:'):                            # a phrase of speech, at 1x with its sound (speech.py)
+            import speech
+            body = spec[4:]
+            if re.fullmatch(r'.+:[\d.]+-[\d.]+', body):           # say:CLIP:START-END, that stretch as it is
+                spec = body
+                talk = 'say ' + body
+            else:
+                hits = speech.find([f.stab for f in flights], body)
+                if not hits:
+                    raise SystemExit(f'{spec}: nobody says that (speech.py)')
+                r, t0_, t1_, text, voice, share = hits[0]
+                f = next(f for f in flights if os.path.normcase(f.stab) == os.path.normcase(r))
+                spec = f'{f.name}:{t0_ - SAY_PAD_S:.2f}-{t1_ + SAY_PAD_S:.2f}'
+                talk = f'say "{text[:40]}"'
+                print(f'  said {spec} by {voice or "?"} ({share:.2f} of the words): "{text}"')
+            fixed = 1.0                                          # @SPEED too: the words stay on the lips
         stem, sec = spec.rsplit(':', 1)
         f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
         if f is None:
@@ -3243,7 +3333,19 @@ def main():
         o1 = min(max(hi, end_at or 0) + int(MUST_OPEN_S * f.fps), f.n)
         f.usable[o0:o1] = True                                   # the editor's call beats the automatic trimming
         f.cu = csum(f.usable.astype(np.float64))
-        musts.append((f.idx, lo, hi, end_at, first, fixed))
+        musts.append((f.idx, lo, hi, end_at, first, fixed, bool(talk)))
+        if talk:
+            said.append((f.idx, lo, hi, talk))
+    if a.talk:                                                   # --talk N: phrases of the footage's speech
+        picked = pick_talk(flights, a.talk, musts, avoided(a.avoid, flights))
+        for f, t0_, t1_, text, voice, sc in picked:
+            lo, hi = int(round((t0_ - SAY_PAD_S) * f.fps)), int(round((t1_ + SAY_PAD_S) * f.fps))
+            musts.append((f.idx, lo, hi, None, False, 1.0, True))
+            said.append((f.idx, lo, hi, f'say "{text[:40]}"'))
+        print(f'  talk: {len(picked)} of {a.talk} phrases' + ''.join(
+            f'; {f.name}:{t0_:.1f}-{t1_:.1f} {voice or "?"} ({sc:.2f}) "{text}"'
+            for f, t0_, t1_, text, voice, sc in picked)
+            + ('' if picked else ' (no speech.py phrases clear enough: job speech = ..., SAY_* rules)'))
     if a.arcs:
         musts += pick_arcs(flights, m, a.arcs, musts)
     avoid = avoided(a.avoid, flights)
@@ -3331,8 +3433,8 @@ def main():
     nh, hc, hm, h0 = hit_stats(scenes, flights, m)
     print(f'  musical hits: {nh}, on a cut {hc}, on a motion onset {hm}, on nothing {h0}'
           + ('' if HIT_ON[0] else ' (--no-hits)'))
-    bites = find_bites(scenes, flights, a.bites, m, heard) if (a.bites or heard) else []
-    if a.bites or heard:
+    bites = find_bites(scenes, flights, a.bites, m, heard, said, a.duck) if (a.bites or heard or said) else []
+    if a.bites or heard or said:
         print('  sound bites: ' + (', '.join(f'{b["what"]} at {b["t0"]:.1f}-{b["t1"]:.1f} s (shot {b["shot"]}, {b["p"]:.2f})'
                                              for b in bites) or 'none found (sounds.py embeddings, margin >= %.2f)' % BITE_MARGIN))
     halves = dissolve_halves(scenes, m, a.fps, a.dissolve)

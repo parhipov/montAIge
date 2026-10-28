@@ -394,6 +394,40 @@ no other within 1.6 s; so heads under 48 px or under 250 are not asked and a yes
 of 32 on the sheet plainly smiling. Few and right on purpose: the owner would rather miss smiles than be sent
 wrong ones.
 
+## Speech and voices
+
+`speech.py` (job `speech = "ru"`; a venv of its own, since pyannote.audio 4 wants NumPy 2): pyannote's
+speaker-diarization-community-1 says who speaks when in a clip, Whisper large-v3-turbo writes the words of that
+speech only, CLAP tells sung from spoken, and the clips' speakers are joined into the job's voices.
+- **Whisper only where pyannote hears speech** (turns 0.5 s apart joined, pieces up to 28 s): over music and
+  silence it writes subtitle credits and "thanks for watching". On singing it still loops: one word sixty times in
+  6 s, one vowel 400 letters long in half a second. Its own test catches that: the text packs over 2.4 by zlib
+  (loops 4.8-47; every real phrase 2.0 or less, a refrain with its repeats included) or comes faster than 30
+  letters a second (speech 5-15).
+- **Word times cost memory**: they keep the encoder's attention of all 32 layers, ~2.9 GB per 30 s piece in fp16.
+  Eight pieces at once asked for 30 GB on an 8 GB card (Windows spilled into shared memory, then gave out); one at
+  a time peaks at 6.1 GB with pyannote and CLAP loaded. 39 min of sound in 13 clips: 11 min.
+- **Sung or spoken** (CLAP: the best of three singing texts against the best of three speaking ones): a
+  children's choir at a median margin of +0.16, a host talking with music under her at +0.01. Over 0, 37 of her 62
+  phrases were "sung"; over 0.08, 3 of them and 50 of the choir's 60.
+- **Clearness**: a phrase's level over the clip's quietest moments put all the phrases of one clip first (its floor
+  20 dB under the others'), whatever played under them. Over what is heard within 5 s of the phrase without speech
+  (music, the hall), the clearest came from five clips; spoken phrases had a median of 2 dB, `--talk` takes 6 and up.
+- **Voices across clips**: a 39 min single take cut into 3 min pieces, against the whole take diarized at once (VBx:
+  4 speakers). The pieces had 38 speakers. Joined by average linkage on their WeSpeaker embeddings at a cosine of
+  0.45-0.5: 8 voices, 84 % of the talk time in its voice's main reference speaker, 89 % of each reference speaker
+  in one voice. Under 0.45 they fell into 3-4 voices (purity 0.6), over 0.6 they split into 14-35 (completeness
+  0.8 down to 0.4). Children reciting in turn are one or two voices to pyannote.
+- **What `--talk` picks and what an editor picks**: the clearest spoken lines of 1.2-7 s made no sense outside the
+  play ("is there or not?"); the lines that told its story were found by reading the transcript (260 phrases for 39
+  min, cheap), two of them at -3 and -9 dB with music starting right after. Interesting is the editor's call.
+- **A voice as a person in view**: not measurable in a hall where somebody is always in view (people in 98.6 % of
+  the half seconds with a voice, 96.9 % without); it needs footage where people come and go.
+- **Lines in order**: placed where each scored best, a play's lines came out shuffled; with `--order` the editor's
+  pieces of a day now keep their recording order, each between the scenes of those recorded before and after it.
+- **The review model and speech**: a static wide shot of a child speaking is "nothing happening" to the stills;
+  a shot under a phrase of speech is not flagged for it.
+
 ## People and the pilot
 
 - **Detection** (`people.py detect`): YOLOv8s-pose, 2 samples a second; per person the box, 17 keypoints and
@@ -607,4 +641,9 @@ is not in a still.
   Worth trying on footage of accented moves towards a steadier camera (a serve, a jump), on tracks the job has.
 - Sound bites the job names in words (`bites = ["laughter"]`): CLAP hears the snow under the skis as water
   splashing; a job could say what its sounds are, as `beauty` says what its views are.
+- Voices beyond one job: a library of known voices (the owner's, the family's: a folder of clips per person
+  compared by WeSpeaker embedding, as a live speaker-ID does), names given by example in the job file
+  (`name = "CLIP:SEC"`), a voice in the people score (`--voices W`) once measured where people come and go, a
+  phrase's sound running on over the next shot (an L-cut: a long line without a long shot), Whisper's own token
+  log-probabilities as clearness.
 - Captions by a bigger model when the GPU allows (Qwen3-VL 4B or 8B): the 2B one misses a dance and invents animals.

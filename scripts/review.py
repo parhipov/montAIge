@@ -11,7 +11,8 @@ ground or sky). Asked for a list of problems from a menu, the 2B model copied th
 asked one question at a time it answers. Each shot gets a line in <edit>_review.txt; a shot answered HIDDEN,
 NOTHING or DULL is a WARN line, which montage.py's qc step prints with qc.py's. The numbers of the plan pass a shot
 of a man just standing there; the picture does not. It is the model's opinion of three stills: read the line
-before swapping the scene (edl_edit.py --replace K).
+before swapping the scene (edl_edit.py --replace K). A shot under a phrase of speech (a say: bite) is not NOTHING:
+its action is what is said, which stills do not show.
 """
 import argparse
 import json
@@ -77,6 +78,7 @@ def main():
     out = a.out or os.path.splitext(a.edl)[0].replace('_edl', '') + '_review.txt'
     flights = {g['idx']: g for g in e['flights']}
     shots = [(s, x) for s in e['scenes'] for x in s['shots']]
+    talk = [(b['t0'], b['t1']) for b in e.get('bites') or [] if b.get('talk')]
     from PIL import Image
     vlm = captions.VLM()
     lines, flagged = [], {}
@@ -92,7 +94,8 @@ def main():
         about = vlm.ask(imgs, DESCRIBE, 64)
         verdicts = {key: vlm.ask(imgs, q, 8) for key, q, _, _ in QUESTIONS}
         for j, (s, x) in enumerate(batch):
-            probs = [what for key, _, bad, what in QUESTIONS if said(verdicts[key][j], bad)]
+            probs = [what for key, _, bad, what in QUESTIONS if said(verdicts[key][j], bad)
+                     and not (key == 'action' and any(t0 < x['t1'] and t1 > x['t0'] for t0, t1 in talk))]
             name = os.path.splitext(os.path.basename(flights[x['flight']]['original']))[0]
             head = f'shot {b0 + j} (scene {s["idx"]}, {x["t0"]:.1f}-{x["t1"]:.1f} s, {name} {x["src_t0"]:.1f} s)'
             lines.append(f'{"WARN" if probs else "OK  "} {head}: {about[j].rstrip(".")} | '

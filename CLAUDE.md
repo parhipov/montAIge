@@ -64,7 +64,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
-  OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`).
+  OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`; `whisper/` fills itself;
+`diarization/speaker-diarization-community-1` from pyannote on Hugging Face, gated: the owner accepts its conditions).
 - When the owner is there: keep steps short, say what is running, take comments in between. Left for the night
   ("do it yourself, I'll watch in the morning"), nothing waits for an answer: the task text is the whole brief,
   every choice is yours (the track, from the catalogue by the footage and by what the owner liked before; the
@@ -115,6 +116,8 @@ lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log fo
 objects = true                                    # vehicles and animals (objects.py)
 sounds = true                                     # the clips' own sound (hear: pieces, --bites 2 on every edit)
 captions = true                                   # the footage in words every 3 s (cap: pieces, review in qc)
+speech = "ru"                                     # what people say, who says it (say: pieces, --talk N on
+                                                  # request; venv models/venvs/speech); off by default: costly
 args = ["--people", "4"]                          # edit.py options of every edit, before each edit's own
 
 [[edit]]
@@ -168,13 +171,15 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   chapters, the days are one shoot: a concert and the workshops of one factory, the band cut in anywhere);
   `--sessions H`: a day's clips more than H hours apart are chapters of their own (the flights by day and the
   evening's), counted by `--chapters`; `--order W` (e.g. 4): scenes in the order of recording within a day (day,
-  evening, sunset); edit.py and qc.py count the scene cuts that step back in time. Landings are marked and kept
+  evening, sunset; the editor's pieces too: a play told in its lines); edit.py and qc.py count the scene cuts
+  that step back in time. Landings are marked and kept
   for the last scene.
 - Never used: `--skip CLIP:START-END` (a crew member walking into the frame, the singer frontal at the mic when
   the sound is not his, the pilot's legs; a `--must` inside it wins).
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`), or `cap:TEXT` (what the captions say, job
-  `captions = true`: "cap:jumping into the water"); a piece longer than its phrase plays faster, up to 1.7x.
+  `captions = true`: "cap:jumping into the water"), or `say:TEXT` / `say:CLIP:START-END` (a phrase of speech,
+  job `speech`: at 1x with its own sound, never sped up); a piece longer than its phrase plays faster, up to 1.7x.
   `@0.5` after a piece plays it at that speed (`CLIP:SEC@0.5`: true slow motion from 50 fps; one or two per
   edit, no more). The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
   phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
@@ -186,6 +191,9 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   sound under the music at a laugh, a shout, a splash; montage.py adds it with `sounds = true`; a `hear:` piece
   always gets its sound). edit.py prints what each did: shot sizes in a row, the opening and closing scores,
   the dissolves, the bites.
+- Speech (job `speech`): `--talk N` (N phrases heard whole: spoken, 1.2-7 s, one voice, clear; only when the
+  owner asks for talk: the clearest lines are seldom the interesting ones), `--duck X` (the music under speech, 0.15; 0: the music only in the gaps, an edit the voices lead). A
+  conversation worth hearing is an editorial call: read `out/<job>/transcript.txt` (cheap) and pick it as `say:`.
 - Seeing the footage in words: job `captions = true` runs `captions.py` (a local vision-language model, 3 s
   chunks, ~0.5 s each) in `features` and `review.py` in `qc` (the model's line per shot of an edit, WARN on
   nothing happening / blurred / dull view / the subject cut off: read the line, then `edl_edit.py --replace K`).
@@ -204,6 +212,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   words or by example (a screenshot found in the footage), look-alike groups, close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
 - `sounds.py embed|search`: the clips' own sound in words (laughter, a shout of joy): a carried camera hears
   people, a drone its propellers.
+- `speech.py run|search|text` (`run` in models/venvs/speech): phrases with their words (Whisper, only where pyannote hears
+  speech), sung or spoken, and voices told apart across the job's clips (V1 talks most; `out/<job>/voices.json`,
+  `voices/V1.wav` to listen, `transcript.txt`); the timeline's `voice`, `speech`, `sung` columns and `phrases`
+  table. A voice is nearly a person in view; the loudest one is often whoever holds the camera.
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s; `--text`
   adds the job's own activities, "welding with sparks", "a crane lifting a load", which the timeline's `activity`
