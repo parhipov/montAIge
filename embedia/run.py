@@ -59,7 +59,7 @@ import av
 import numpy as np
 
 from embedia import paths
-from embedia.read import stabilized_before
+from embedia.read import export_of, stabilized_before
 
 ROOT = paths.ROOT
 MODELS = paths.MODELS
@@ -258,7 +258,7 @@ def scan(ix, join=False):
         if '_stabilized' in n.lower():
             # an export of an original that is here is the owner's old export (exports.py); without its original
             # it is the footage itself, already stabilized: picture as it is, motion from it (vis_motion.py)
-            (exports if n.lower().split('_stabilized')[0] in stems else elsewhere).append(f)
+            (exports if export_of(n, stems) else elsewhere).append(f)
             continue
         clips.append(f)
     keep = []

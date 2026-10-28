@@ -81,6 +81,17 @@ def stabilized_before(path):
     return '_stabilized' in os.path.basename(path).lower()
 
 
+def export_of(name, stems):
+    """The original (one of `stems`, lower case) a `_stabilized` export is of, or None: its name before
+    `_stabilized` is the original's, or ends with it after words the owner put in front ("tubing, the good take
+    GH018650_stabilized.mp4")."""
+    head = os.path.basename(name).lower().split('_stabilized')[0]
+    for s in stems:
+        if head == s or head.endswith(s) and not head[-len(s) - 1].isalnum():
+            return s
+    return None
+
+
 def owner_picked(path):
     """A clip the owner stabilized themselves: a `_stabilized` export without its original, or an original with
     the owner's `_stabilized` export of the whole flight beside it (PICK_WHOLE of its length or more: Gyroflow's
@@ -89,13 +100,14 @@ def owner_picked(path):
     if stabilized_before(path):
         return True
     d, n = os.path.split(path)
-    want = os.path.splitext(n)[0].lower() + '_stabilized'
+    stem = os.path.splitext(n)[0].lower()
     exp = [m for m in (os.listdir(d or '.') if os.path.isdir(d or '.') else [])
-           if os.path.splitext(m)[0].lower() == want]
-    if not exp:
-        return False
-    with av.open(path) as a, av.open(os.path.join(d, exp[0])) as b:
-        return b.duration >= PICK_WHOLE * a.duration
+           if os.path.splitext(m)[0].lower().endswith('_stabilized') and export_of(m, [stem])]
+    for m in exp:
+        with av.open(path) as a, av.open(os.path.join(d, m)) as b:
+            if b.duration >= PICK_WHOLE * a.duration:
+                return True
+    return False
 
 
 def creation_time(path):
