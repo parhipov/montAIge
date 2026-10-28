@@ -31,6 +31,7 @@ quality render), <out>_plan.png.
 """
 import argparse
 import contextlib
+import fnmatch
 import glob
 import io
 import json
@@ -216,6 +217,12 @@ W_EMPTY, EMPTY_BELOW = 4.0, 0.35
 # the pilot: worth this much of another person; once PILOT_BUDGET of the edit shows the pilot alone,
 # every further pilot-alone shot pays W_PILOT_OVER x its pilot-alone share
 PILOT_WORTH, PILOT_BUDGET, W_PILOT_OVER = 0.3, 0.15, 3.0
+# a person cut off at the top: big (CUT_AREA of the frame or more), the box at the frame's top edge, and the face
+# not seen (nose and eyes under 0.5: YOLO-pose puts a head out of the picture at y 0 with a low confidence) or the
+# eyes within CUT_EYES of the edge. A GoPro on a ring post with a red T-shirt's belly in front: 93 % of its samples;
+# close-ups of hands being wrapped, teens at the ropes, a girl sitting on the floor 0 %; sparring 9-13 %. A sample
+# whose biggest person is cut off is worth -CUT_WORTH of a person, and they are not the main character in view
+CUT_AREA, CUT_EYES, CUT_WORTH = 0.06, 0.04, 0.5
 SUBJECT_BOOST = 2.0     # the film's main character (people.py subject) against anybody else
 SUBJECT_TAG = ['']      # --subject NAME: <render>_subject_NAME.npy instead of <render>_subject.npy; A+B+C: any of them
 MINOR_TAG = ['']        # --minor NAME: that main character (of another edit) counts like the pilot here
@@ -328,10 +335,36 @@ MATCH_TONE, MATCH_TONE_Q = 0.5, tuple(range(10, 91, 5))
 
 
 # =================================================================== footage
+def head_cut(z):
+    """Per people.npz row: a big person with the head out of the picture at the top (CUT_AREA, CUT_EYES)."""
+    if not len(z['frame']):
+        return np.zeros(0, bool)
+    box, kp = z['box'], z['kp'].reshape(-1, 17, 3)
+    face = kp[:, :3]                                             # nose, eyes
+    eye_y = np.where(face[:, 1:, 2] >= 0.5, face[:, 1:, 1], 9.0).min(1)
+    return ((box[:, 2] * box[:, 3] >= CUT_AREA) & (box[:, 1] - box[:, 3] / 2 < 0.02)
+            & ((face[:, :, 2].max(1) < 0.5) | (eye_y < CUT_EYES)))
+
+
+def load_cut(base, n):
+    """Per frame 0/1: the biggest person in the picture has the head cut off (head_cut), or zeros."""
+    if not os.path.exists(base + '_people.npz'):
+        return np.zeros(n)
+    z = np.load(base + '_people.npz')
+    k = np.searchsorted(z['samples'], z['frame'])
+    area = z['box'][:, 2] * z['box'][:, 3] if len(z['frame']) else np.zeros(0)
+    cut = head_cut(z)
+    ca, oa = np.zeros(len(z['samples'])), np.zeros(len(z['samples']))
+    np.maximum.at(ca, k[cut], area[cut])
+    np.maximum.at(oa, k[~cut], area[~cut])
+    return np.interp(np.arange(n), z['samples'], (ca > oa).astype(float))
+
+
 def load_people_pose(base, n):
     """people.py data: people other than the pilot, by size, x1.3 facing the camera, x1.6 waving;
     approach / recede of the biggest of them +0.5; passes between legs / under / over +1.5, past +0.5;
-    the pilot alone in the picture -0.5 at most. None without people.py output."""
+    the pilot alone in the picture -0.5 at most; the biggest person with the head cut off -CUT_WORTH.
+    None without people.py output."""
     if not os.path.exists(base + '_people.npz'):
         return None
     from embedia import objects
@@ -347,10 +380,13 @@ def load_people_pose(base, n):
     k = np.searchsorted(samples, z['frame'])
     area = z['box'][:, 2] * z['box'][:, 3]
     other_a, pilot_a, n_other = np.zeros(len(samples)), np.zeros(len(samples)), np.zeros(len(samples))
-    subj_a = np.zeros(len(samples))
+    subj_a, cut_a = np.zeros(len(samples)), np.zeros(len(samples))
     boost = np.ones(len(samples))
-    for i, a, p, wv, fc, nq, sb, mn in zip(k, area, pil, z['wave'], z['face'], notp, subj, minor):
+    for i, a, p, wv, fc, nq, sb, mn, ct in zip(k, area, pil, z['wave'], z['face'], notp, subj, minor, head_cut(z)):
         if nq > 0.5:                                             # not a person after all (sand, sky, tree)
+            continue
+        if ct:
+            cut_a[i] = max(cut_a[i], a)
             continue
         if p or (mn and not sb):                                 # the pilot, or another edit's main character
             pilot_a[i] = max(pilot_a[i], a)
@@ -369,6 +405,7 @@ def load_people_pose(base, n):
         n_other = n_other + (subj_a > 0)
     # the pilot is welcome, just worth less than everybody else (and rationed by PILOT_BUDGET in assign)
     v += np.where(n_other == 0, PILOT_WORTH * np.minimum(1.0, np.sqrt(pilot_a / PEOPLE_FULL)), 0.0)
+    v = np.where(cut_a > np.maximum(np.maximum(other_a, subj_a), pilot_a), -CUT_WORTH, v)
     out = np.interp(np.arange(n), samples, v)
     bump = np.zeros(n)
     half = int(0.5 * fps)
@@ -413,6 +450,7 @@ def load_subject(stab, proxy_dir, n):
         sb = sb & ~np.load(base + '_pilot.npy')
     if FOCUS_MIN[0]:
         sb = sb & (z['box'][:, 2] * z['box'][:, 3] >= FOCUS_MIN[0])
+    sb = sb & ~head_cut(z)                                       # a belly in the frame is not them in view
     has = np.zeros(len(z['samples']))
     has[np.searchsorted(z['samples'], z['frame'])[sb]] = 1
     return np.interp(np.arange(n), z['samples'], has)
@@ -799,6 +837,8 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         fl.cpa = csum(load_pilot_alone(render, proxy_dir, n))
         fl.csb = csum(load_subject(render, proxy_dir, n))
         fl.cimp = csum(load_stand_ins(render, proxy_dir, n))
+        fl.ccut = csum(load_cut(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n)
+                       if proxy_dir else np.zeros(n))
         fl.can = csum(load_animals(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n) > 0)
         fl.beauty = load_beauty(render, n)
         ex = load_people_extras(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n)
@@ -2044,6 +2084,7 @@ def take(sc, f, starts, ns, pools, used, seen, moves, hero_used, shown):
             x['subject'] = float((f.csb[a + n] - f.csb[a]) / n)
             x['stand_in'] = float((f.cimp[a + n] - f.cimp[a]) / n)
             x['animal'] = float((f.can[a + n] - f.can[a]) / n)
+            x['head_cut'] = float((f.ccut[a + n] - f.ccut[a]) / n)
             PILOT_USED[0] += x['pilot_alone'] * (x['t1'] - x['t0'])
         x.update(flight=f.idx, src_frame=int(a), src_frames=int(n),
                  skill=float(shot_quality(x, f, np.array([a]), n, pools)[0]),
@@ -2388,8 +2429,14 @@ def levels(px):
     return [float(lo)] + [gain * float(v) for v in wb]
 
 
+def lut_for(f, lut):
+    """The LUT when the clip is log footage (--lut-clips; an EDL without the mark: every clip)."""
+    return lut if getattr(f, 'log', True) else None
+
+
 def clip_pixels(f, lut, k=MATCH_FRAMES, w=160):
     """RGB pixels (N, 3; after the LUT) of k frames spread over a clip's usable footage."""
+    lut = lut_for(f, lut)
     u = getattr(f, 'usable', None)
     idx = np.flatnonzero(u) if u is not None and u.any() else np.arange(f.n)
     want = sorted(set(idx[np.linspace(0, len(idx) - 1, k).astype(int)].tolist()))
@@ -2478,6 +2525,7 @@ def shot_grade(f, a, n, lut):
     """Levels and white balance through one shot, from 9 of its frames: one key per third
     -> [[place in the shot 0..1, black in, r, g, b gains], ...]; a shot whose thirds agree gets one key.
     A shot that flies from a dark staircase onto a bright court changes levels as it goes."""
+    lut = lut_for(f, lut)
     c = av.open(f.proxy or f.stab)
     st = c.streams.video[0]
     w = 320
@@ -2763,6 +2811,7 @@ def shot_pictures(x, f, reader, j_from, j_to, fps_out, to_rgb, zx, zy, W, H, lut
     """(output frame, source position, speed, picture) of shot x for output frames j_from .. j_to-1; past the
     shot's own range the time map runs on straight at its end speeds (a dissolve's pre-roll and tail). The
     picture has the LUT, the colour match and the shot's grade on it."""
+    lut = lut_for(f, lut)
     c, st = reader
     tm = time_map(x)
     u, v = np.array(x['anchor_t']), np.array(x['anchors'])
@@ -2961,6 +3010,9 @@ def make_parser():
     ap.add_argument('--cache', default=None, help='telemetry cache folder (default: next to the output)')
     ap.add_argument('--proxy-dir', default=None, help='proxy.py output: 480p proxies and image motion features')
     ap.add_argument('--lut', default=None, help='.cube LUT for the picture, e.g. D-Log M -> Rec.709')
+    ap.add_argument('--lut-clips', nargs='+', default=None,
+                    help='clip names (wildcards) the LUT is for: log footage beside footage that is not (a drone in '
+                         'D-Log M, hand cameras in normal colour); default every clip')
     ap.add_argument('--bpm', type=float, default=None, help='tempo hint when the detector picks the wrong one')
     ap.add_argument('--avoid', action='append', default=[], help='EDL of an earlier edit of the series: its footage is taken')
     ap.add_argument('--subject', default='', help='main character tag: people.py subject --tag NAME')
@@ -3206,6 +3258,9 @@ def main():
     else:
         flights = find_flights(a.footage, cache, a.proxy_dir)
     prepare_flights(flights, a)
+    for f in flights:
+        f.log = not a.lut_clips or any(fnmatch.fnmatch(os.path.splitext(os.path.basename(f.src))[0].lower(), p.lower())
+                                       for p in a.lut_clips)
     FLOWN_ANY[0] = any(not carried_of(f) for f in flights)
     for f in flights if not a.brief else []:
         kinds = ', '.join(f'{f.trick_kind.count(k)} {k}' for k in EVENT_KINDS
@@ -3383,6 +3438,9 @@ def main():
         pp = np.array([x.get('people', 0.0) for x in shots])
         dur_p = sum(x['t1'] - x['t0'] for x in shots if x.get('people', 0) > 0.15)
         print(f'  people: in {np.mean(pp > 0.15) * 100:.0f} % of shots ({dur_p:.0f} s of {m["duration"]:.0f} s), mean presence {pp.mean():.2f}')
+        cut = [(i, x['head_cut']) for i, x in enumerate(shots) if x.get('head_cut', 0) > 0.25]
+        print(f'  heads cut off (the biggest person, over 25 % of a shot): {len(cut)} shots'
+              + ''.join(f', shot {i} {c:.0%}' for i, c in cut))
     fly = [x['skill'] for s in scenes if s.get('fly') for x in s['shots']]
     print(f'  flying scenes: {sum(s.get("fly", False) for s in scenes)}, piloting there {np.median(fly) if fly else 0:.2f}, '
           f'manoeuvres {[x["fly_kind"] for x in shots if x.get("fly_kind")]}; '
@@ -3461,7 +3519,8 @@ def main():
                flights=[dict(idx=f.idx, original=f.src, render=f.stab, render_offset=f.offset,
                                         proxy=f.proxy, fps=f.fps, day=getattr(f, 'day', None),
                                         recorded=getattr(f, 'when', None) and f.when.isoformat(),
-                                        match=getattr(f, 'match', None)) for f in flights],
+                                        match=getattr(f, 'match', None), log=getattr(f, 'log', True))
+                            for f in flights],
                scenes=[dict(idx=s['idx'], kind=s['kind'], cls=s['cls'], hero=s['hero'], slow_hero=s['slow_hero'], fly=s['fly'],
                             dissolve_in=s.get('dissolve_in', False),
                             must=bool(s.get('must')), section=s.get('section'),

@@ -9,12 +9,15 @@ embedia.toml (written by hand, by `python -m embedia init`, or by the montage fr
     footage = ["/path/to/footage"]           # folders (subfolders too) or single clips
     camera = "drone"                         # "carried": in a hand, on a helmet, not flown (no pilot, no passes);
                                              # "auto": per clip by its accelerometer (camera.py, GoPro)
+    carried = ["GX*", "DJI_2000*"]           # with "auto": clip names (wildcards) carried, said (a hand camera with
+                                             # no accelerometer, a GoPro stabilized elsewhere); the rest by camera.py
     gyroflow = "/path/to/Gyroflow.exe"       # or the GYROFLOW environment variable: proxies of clips with motion data
     stabilize = false                        # true: clips with motion data are measured on Gyroflow's stabilized
                                              # render, kept as their proxy; false: on the original as it is, scaled
                                              # down while a step reads it, removed after the run (default: fpv's
                                              # value; the montage sets true: it cuts previews from the proxies)
     renders = 3                              # Gyroflow renders at once
+    workers = 4                              # CPU steps' processes at once (analyze, vis_motion; default half the CPUs)
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
     people = true                            # poses, waving, facing the camera (default true)
     fpv = true                               # FPV drone footage: who the pilot is (goggles, a radio), close passes
@@ -445,6 +448,11 @@ def speech_py(ix):
     return py
 
 
+def workers(ix):
+    """The CPU steps' processes at once (`workers`; default half the CPUs): fewer on a machine others work on."""
+    return ['--workers', str(ix.cfg['workers'])] if ix.cfg.get('workers') else []
+
+
 def lst(ix, name, srcs):
     """A list file of clip paths (paths with spaces or Cyrillic go through a file, not the command line)."""
     os.makedirs(ix.log_dir, exist_ok=True)
@@ -464,11 +472,12 @@ def language(cfg):
 
 
 STEPS = [
-    Step('cameras', 1, (), lambda ix, s, r: ['--list', ix.originals_txt, '--out', os.path.join(ix.root, 'cameras.json')],
+    Step('cameras', 1, (), lambda ix, s, r: ['--list', ix.originals_txt, '--out', os.path.join(ix.root, 'cameras.json'),
+                                             '--carried', *ix.cfg.get('carried', [])],
          on=lambda c: c.get('camera') == 'auto', whole=True, files=('cameras.json',), picture=False),
-    Step('analyze', 1, ('flow', 'look'), lambda ix, s, r: r),
-    Step('vis_motion', 1, ('vis',), lambda ix, s, r: r + (['--hfov', ix.cfg['hfov']] if ix.cfg.get('hfov') else []),
-         clips='picture'),
+    Step('analyze', 1, ('flow', 'look'), lambda ix, s, r: r + workers(ix)),
+    Step('vis_motion', 1, ('vis',), lambda ix, s, r: r + (['--hfov', ix.cfg['hfov']] if ix.cfg.get('hfov') else [])
+         + workers(ix), clips='picture'),
     Step('gps', 1, ('gps',), lambda ix, s, r: ['track', '--list', lst(ix, 'gps', s), '--proxy-dir', ix.proxy_dir],
          clips='gopro', optional=True, picture=False),
     Step('people', 1, ('people',), lambda ix, s, r: ['detect'] + r + ['--weights', yolo('yolov8s-pose.pt'),

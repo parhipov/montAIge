@@ -19,7 +19,9 @@ the job's name is its folder (or `name = ...`). What the footage is and which an
     camera = "carried"                       # carried by a person (hand, helmet, chest), not flown: no pilot, no close
                                              # passes, edit.py --carried (default "drone"); "auto": per clip by its
                                              # accelerometer (camera.py), a trip filmed both ways
+    carried = ["GX*", "DJI_2000*"]           # with "auto": clips carried, said (no accelerometer to tell)
     renders = 3                              # Gyroflow renders at once (default 3)
+    workers = 4                              # CPU steps' processes at once (default half the CPUs)
     people = true                            # poses (default true)
     fpv = true                               # FPV drone footage: the pilot, close passes (default false: say it)
     objects = false                          # animals, vehicles (objects.py)
@@ -46,6 +48,7 @@ The job's own questions to the index (kept there with their input, asked again f
 The montage's own:
 
     lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # only for log footage
+    lut_clips = ["DJI_2026*"]                # the clips in log, when the others are not (default every clip)
     args = ["--people", "4"]                 # edit.py options of every edit (before the edit's own)
 
     [[edit]]
@@ -92,6 +95,8 @@ from embedia import run as er  # noqa: E402
 from montaige import beats  # noqa: E402
 ROOT = paths.ROOT
 STEPS = ('scan', 'render', 'features', 'edits', 'qc')
+# a step's printed lines read back: UTF-8 both ways (captions and clip names carry Cyrillic; Windows' default is cp1252)
+TEXT = dict(capture_output=True, encoding='utf-8', errors='replace', env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
 PROXY_W = er.PROXY_W
 MODELS = paths.MODELS
 
@@ -140,7 +145,7 @@ def run(args, log=None, py=None):
 
 # ------------------------------------------------------------------------------------------- the index
 # the job file's keys that describe the footage and the analyzers: the index's (embedia.toml)
-INDEX_KEYS = ('footage', 'camera', 'gyroflow', 'stabilize', 'renders', 'hfov', 'people', 'fpv', 'track', 'objects',
+INDEX_KEYS = ('footage', 'camera', 'carried', 'gyroflow', 'stabilize', 'renders', 'workers', 'hfov', 'people', 'fpv', 'track', 'objects',
               'places', 'sounds', 'captions', 'speech', 'speech_py')
 
 
@@ -290,6 +295,7 @@ def edits(job, job_path, out, ix, plan_only=False):
                 cmd += ['--bpm', e['bpm']]
             if job.get('lut'):
                 cmd += ['--lut', job['lut'], '--grade', 'auto']
+                cmd += ['--lut-clips', *job['lut_clips']] if job.get('lut_clips') else []
             if job.get('sounds'):                                # the clips' own sound under the music at its moments
                 cmd += ['--bites', 2]
             if e.get('series'):
@@ -315,18 +321,17 @@ def qc(job, out):
             continue
         edl, mp4 = (os.path.join(out, name, name + x) for x in ('_edl.json', '.mp4'))
         if os.path.exists(mp4):
-            r = subprocess.run([sys.executable, os.path.join(HERE, 'qc.py'), edl, mp4], capture_output=True, text=True)
+            r = subprocess.run([sys.executable, os.path.join(HERE, 'qc.py'), edl, mp4], **TEXT)
             open(os.path.join(out, name, name + '_qc.txt'), 'w', encoding='utf-8').write(r.stdout)
             warn = [x for x in r.stdout.splitlines() if x.startswith('WARN')]
             print(f'  {name}: {len(warn)} WARN' + ''.join(f'\n    {w}' for w in warn))
             sheet = [sys.executable, os.path.join(HERE, 'edl_sheet.py'), edl]
             subprocess.run(sheet + [os.path.join(out, name, name + '_sheet.jpg')], capture_output=True)
-            r = subprocess.run(sheet + [os.path.join(out, name, name + '_cuts.jpg'), '--cuts'], capture_output=True,
-                               text=True)
+            r = subprocess.run(sheet + [os.path.join(out, name, name + '_cuts.jpg'), '--cuts'], **TEXT)
             open(os.path.join(out, name, name + '_cuts.txt'), 'w', encoding='utf-8').write(r.stdout + r.stderr)
             print(f'    {(r.stdout.strip().splitlines() or ["cut sheet failed, see _cuts.txt"])[-1]}')
             if job.get('captions', False):                       # the model's look at every shot (review.py)
-                r = subprocess.run([sys.executable, os.path.join(HERE, 'review.py'), edl], capture_output=True, text=True)
+                r = subprocess.run([sys.executable, os.path.join(HERE, 'review.py'), edl], **TEXT)
                 lines = [x for x in r.stdout.splitlines() if x.startswith(('WARN', 'review:'))]
                 print(''.join(f'    {x}\n' for x in lines) or f'    review failed: {r.stderr.strip().splitlines()[-1:]}')
 

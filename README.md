@@ -52,7 +52,8 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
     picture when there is no gyro to read (a clip stabilized elsewhere, a camera without one): turns, dives,
     climbs, flips, close passes, a piloting score;
   - people: who is in view, which of them is the pilot (FPV goggles or a radio), flying between someone's legs
-    or over them, a main character described in words or shown by an example image;
+    or over them, a main character described in words or shown by an example image, a close-up with the head
+    out of the frame (by the skeleton);
   - places and activities by text query (CLIP), routes through several places, grouping clips by location;
   - earlier exports in the footage folder, matched to the original clips;
   - beautiful views, on request, with beauty in the job's own words (mountains, a beach);
@@ -179,7 +180,8 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 Requirements: an NVIDIA GPU (tested on an RTX 3050, 8 GB), Python 3.11+, PyTorch with CUDA, ultralytics,
 transformers and accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu for face
 matching only; speech (optional) in a second environment, `models/venvs/speech` (or `SPEECH_PY`): PyTorch with
-CUDA, pyannote.audio 4 (it wants NumPy 2), transformers, PyAV. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 and GoPro footage, and
+CUDA, pyannote.audio 4 (it wants NumPy 2), transformers, PyAV. Tested on Windows 10 with DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2, Osmo Pocket 3 and GoPro footage
+(an Avata 2 in D-Log M beside hand cameras in normal colour: the LUT on the log clips only), and
 with clips with no usable gyro (an Osmo Action 3, exports stabilized elsewhere): their camera motion comes from
 the picture.
 

@@ -52,7 +52,7 @@ https://github.com/user-attachments/assets/298f87c8-04dd-475a-b33f-7d5b72b9fbe3
     гироданных нет (клип, стабилизированный в другом месте, камера без гироскопа): повороты, пике, подъёмы,
     флипы, пролёты вплотную, оценка пилотирования;
   - люди: кто в кадре, кто из них пилот (FPV-очки или пульт), пролёт между ног или над человеком, главный
-    герой по описанию словами или по фото-примеру;
+    герой по описанию словами или по фото-примеру, крупный план с головой за краем кадра (по скелету);
   - места и действия по текстовому запросу (CLIP), маршруты через несколько мест, группировка клипов по
     локациям;
   - старые экспорты в папке с материалом, сопоставленные с оригиналами;
@@ -181,7 +181,8 @@ args = ["--want", "ascent", "--theme", "a man working on a roof"]
 Требования: видеокарта NVIDIA (проверено на RTX 3050, 8 ГБ), Python 3.11+, PyTorch с CUDA, ultralytics,
 transformers и accelerate, PyAV, OpenCV, NumPy, SciPy, Pillow, Matplotlib, Gyroflow 1.6.3; onnxruntime-gpu нужен только
 для сравнения лиц; речь (по желанию) во втором окружении, `models/venvs/speech` (или `SPEECH_PY`): PyTorch с CUDA,
-pyannote.audio 4 (ему нужен NumPy 2), transformers, PyAV. Проверено на Windows 10 с материалом DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2 и GoPro, а
+pyannote.audio 4 (ему нужен NumPy 2), transformers, PyAV. Проверено на Windows 10 с материалом DJI O4 Pro, O4 Air Unit, O3 Air Unit, Avata 2, Osmo Pocket 3 и GoPro
+(Avata 2 в D-Log M рядом с ручными камерами в обычном цвете: LUT только на лог-клипах), а
 также с клипами без пригодных гироданных (Osmo Action 3, экспорты, стабилизированные в другом месте): движение
 камеры у них берётся по картинке.
 

@@ -138,6 +138,7 @@ def load_flights(e, cache):
         raise SystemExit('the footage is not the one the EDL was made from')
     for f, g in zip(flights, fl):
         f.match = g.get('match')
+        f.log = g.get('log', True)
     return flights
 
 
@@ -292,7 +293,7 @@ def render_edl(e, out, height=480, fps=25):
         p = f.get('proxy') or f['render']
         n, _ = edit.frame_count(p)
         flights[f['idx']] = types.SimpleNamespace(idx=f['idx'], proxy=p, stab=f['render'], fps=f['fps'], n=n,
-                                                  match=f.get('match'))
+                                                  match=f.get('match'), log=f.get('log', True))
     m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     m['path'] = e['music']
     lut = edit.CubeLUT(e['lut']) if e.get('lut') else None

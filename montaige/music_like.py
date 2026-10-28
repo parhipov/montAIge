@@ -2,6 +2,7 @@
 
     python music_like.py LIKED.mp3 [LIKED2.mp3 ...] [--not DISLIKED.mp3 ...] [--top 12]
                          [--bpm-tol 0.12] [--feel 2] [--files CAND.mp3 ...]
+                         [--bpm 128 --feels "Driving, Intense"]      a liked track not in the catalogue
 
 Picking tracks by the catalogue's words went wrong twice in three on one job (an orchestral "epic, uplifting" and
 a "driving" synth track: "the music does not fit at all"), while a happy steel-drum piece fitted. So once the owner
@@ -85,12 +86,16 @@ def same(path, piece):
     return n == piece['filename'].lower().replace('_', ' ')
 
 
-def candidates(liked, cat, tol, feel):
-    """Catalogue pieces near the liked ones in tempo and sharing `feel` of their feel words, downloaded."""
+def candidates(liked, cat, tol, feel, bpm=None, feels=None):
+    """Catalogue pieces near the liked ones in tempo and sharing `feel` of their feel words, downloaded. A liked
+    track from outside the catalogue (the owner's own) is described by `bpm` and `feels` instead."""
     ref = [next((p for p in cat if same(f, p)), None) for f in liked]
     ref = [p for p in ref if p]
+    if bpm:
+        ref.append({'bpm': bpm, 'feel': feels or ''})
     if not ref:
-        raise SystemExit('the liked tracks are not in the catalogue by file name: give candidates with --files')
+        raise SystemExit('the liked tracks are not in the catalogue by file name: give --bpm and --feels, or '
+                         'candidates with --files')
     os.makedirs(CACHE, exist_ok=True)
     out = []
     for p in cat:
@@ -119,11 +124,13 @@ def main():
     ap.add_argument('--bpm-tol', type=float, default=0.12)
     ap.add_argument('--feel', type=int, default=2, help='feel words shared with a liked track')
     ap.add_argument('--top', type=int, default=12)
+    ap.add_argument('--bpm', type=float, default=None, help='a liked track not in the catalogue: its BPM')
+    ap.add_argument('--feels', default=None, help='... and its feel in the catalogue\'s words: "Driving, Intense"')
     a = ap.parse_args()
     with open(CATALOGUE, encoding='utf-8') as fh:
         cat = json.load(fh)
     cands = ([(f, next((p for p in cat if same(f, p)), {})) for f in a.files] if a.files is not None
-             else candidates(a.liked, cat, a.bpm_tol, a.feel))
+             else candidates(a.liked, cat, a.bpm_tol, a.feel, a.bpm, a.feels))
     print(f'{len(cands)} candidates')
     mdl = model_of()
     embs = {f: track_emb(f, mdl) for f in list(a.liked) + a.disliked + [f for f, _ in cands]}

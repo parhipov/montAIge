@@ -101,11 +101,11 @@ class GpuGrade:
             self.dmin = torch.tensor(lut.dmin, dtype=torch.float32, device=self.dev)
             self.dmax = torch.tensor(lut.dmax, dtype=torch.float32, device=self.dev)
 
-    def __call__(self, img, g, match=None):
+    def __call__(self, img, g, match=None, log=True):
         torch = self.torch
         x = torch.from_numpy(img.astype(np.float32) if img.dtype == np.uint16 else img).to(self.dev).float()
         x = x / (65535.0 if img.dtype == np.uint16 else 255.0)
-        if self.vol is not None:
+        if self.vol is not None and log:                         # the EDL's flight not log footage (--lut-clips)
             grid = ((x - self.dmin) / (self.dmax - self.dmin) * 2 - 1)[None, None]    # (1, 1, H, W, rgb) -> (W, H, D)
             x = torch.nn.functional.grid_sample(self.vol, grid, mode='bilinear', padding_mode='border',
                                                 align_corners=True)[0, :, 0].permute(1, 2, 0)
@@ -360,7 +360,7 @@ def main():
         slow = (src_at(t - x['t0'] + 0.02) - src_at(t - x['t0'] - 0.02)) / 0.04 < bf.SLOW_BLEND * rd.fps
         img = rd.at(max(src - starts[(fi, j)], 0.0), slow)
         g = None if a.no_grade else bf.grade_at(x.get('grade'), (src - x['src_frame']) / max(x['src_frames'], 1))
-        return grade(img, g, None if a.no_grade else flights[fi].get('match'))
+        return grade(img, g, None if a.no_grade else flights[fi].get('match'), flights[fi].get('log', True))
 
     # a chapter is a day, or a session of one ('2022-08-06 19:23', edit.py --sessions): a caption per day
     dates = [(x['day'] or '')[:10] for x in shots]

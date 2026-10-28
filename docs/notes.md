@@ -85,7 +85,9 @@ renders (same frame count as the original), telemetry from the original.
   against all sounds); centred on the mean of all tracks embedded, the liked one against the rejected orchestral
   one went from 0.98 to -0.47, and the candidates spread -0.52..0.69. The top had a steel-drum and marimba piece
   (Moonlight Beach) and an upbeat acoustic one, but also an Irish pub tune first and another steel-drum party
-  piece 55th: the sound is a better guess than the words, not an answer; the owner still chooses by ear.
+  piece 55th: the sound is a better guess than the words, not an answer; the owner still chooses by ear. A liked
+  track from outside the catalogue (the owner's own) is described by `--bpm` and `--feels` in the catalogue's
+  words.
 
 - **A performance filmed without sound** (DJI O4 clips carry no audio) could not be aligned to its recording by
   picture (frame brightness, the stage lights and the frame difference against the track's envelopes at every
@@ -190,10 +192,10 @@ renders (same frame count as the original), telemetry from the original.
   the flown clips only. Missed once: a gentle cinewhoop with a soft-mounted GoPro (moose) read carried, 1.06 over
   the clip with 28 s on the grass before the take-off, 0.6-1.8 per 10 s in the air, and no walking cadence
   (1.5-2.5 Hz) either; the job file said `camera = "drone"`.
-- **A hand camera beside a drone** (an Avata 2 flown in a gym, an Osmo Action 3 and GoPros on the floor and the
+- **A hand camera beside a drone** (an Avata 2 flown in a gym, an Osmo Pocket 3 and GoPros on the floor and the
   ring posts). Without the accelerometer (GoPro exports stabilized elsewhere, DJI files) there is no verdict, so
-  `cameras.json` was written by hand. What the drone rules did to the rest: a camera standing still is "on the
-  ground", and the GoPros set down kept 10-23 % of their footage (a still hand camera is a shot now); flying
+  the job file names the carried clips (`carried`, into `cameras.json`). What the drone rules did to the rest: a
+  camera standing still is "on the ground", and the GoPros set down kept 10-23 % of their footage (a still hand camera is a shot now); flying
   scenes took the GoPros, whose motion from the picture scored gloves past the lens as manoeuvres (7 of 10
   scenes; `--fly` takes only flown clips when a job has both); a whip of the hand camera to the ceiling scored
   "turn" 0.94. Turning over 60 deg/s told it apart: 46 % of its frames against 0-3 % in close-ups of pads, a bag,
@@ -460,6 +462,14 @@ speech only, CLAP tells sung from spoken, and the clips' speakers are joined int
 - **People value:** a person covering 2 % of the frame or more counts 1, smaller ones less; ×1.3 facing the
   camera, ×1.6 waving; approaching or receding within ±0.5 s adds 0.5; a pass between the legs, under or over
   adds 1.5. `--people 4` weighs it like piloting.
+- **A head cut off:** the people value grows with the person's area, so a body standing right at the camera
+  with the head out of the frame scored as the best close-up. YOLO-pose puts a head out of the picture at the
+  frame's edge with a low confidence; the rule: a person of 6 % of the frame or more, the box at the top edge,
+  and the nose and eyes under 0.5 or the eyes within 4 % of the edge. Shots with the head cut off: 93 % of the
+  samples; close-ups with the head in view: 0 %; wide shots of a crowd: ~10 %. Low face confidence alone caught
+  a third (YOLO also guesses a face at the edge), the head room from the shoulder width half, and it fired on
+  bowed heads. The biggest person cut off makes the sample worth -0.5 of a person, and not the main character
+  in view.
 - **The pilot** is the easiest person to pick: standing still, close to every take-off, in every flight. In
   one people edit nearly all "people" were the pilot. Clothes-colour clustering failed (backlit dark jackets,
   children holding toys strike the radio pose). CLIP zero-shot on each person crop does it: "wearing FPV

@@ -1,15 +1,18 @@
 """Flown or carried, per clip, from the camera's own accelerometer (a GoPro's GPMF ACCL, ~200 a second).
 
     python camera.py CLIP [...]                      one line per clip
-    python camera.py --list originals.txt --out cameras.json
+    python camera.py --list originals.txt --out cameras.json [--carried GX* DJI_2000*]
 
 A drone's thrust shakes the camera: the acceleration under 5 Hz moved by 1.6-5.4 m/s2 RMS over every flight of
 over 15 s (63 GoPro clips of six shoots: FPV over towns, forests, water, a canyon), and by 0.2-1.1 on a skier's
 helmet or in a hand (16 clips). The camera's rotation does not tell them apart: a calm flight peaked at 93-138
 deg/s, a run down a slope at 55-134. A clip without an accelerometer (DJI, a clip stabilized elsewhere) or under
-4 s (fiddling before a take-off) gets no verdict: the job's default (montage.py `camera`).
+4 s (fiddling before a take-off) gets no verdict: the job's default (montage.py `camera`). `--carried`: clip names
+(wildcards) carried whatever the accelerometer says, e.g. a hand camera with none (an Osmo, GoPros stabilized
+elsewhere) beside a drone: the indexer says it, as with `fpv`.
 """
 import argparse
+import fnmatch
 import json
 import os
 import sys
@@ -39,6 +42,7 @@ def main():
     ap.add_argument('clips', nargs='*')
     ap.add_argument('--list', default=None, help='text file: one clip per line')
     ap.add_argument('--out', default=None, help='JSON {clip name: "drone" | "carried"}, clips with a verdict only')
+    ap.add_argument('--carried', nargs='*', default=[], help='clip names (wildcards): carried, said by the indexer')
     a = ap.parse_args()
     clips = list(a.clips)
     if a.list:
@@ -53,8 +57,12 @@ def main():
             print(f'{os.path.basename(c)}: unreadable ({e})')
             continue
         name = os.path.splitext(os.path.basename(c))[0]
-        print(f'{name}: ' + (f'{k} (acceleration under 5 Hz {lf:.2f} m/s2)' if k else 'no verdict (no accelerometer, '
-                                                                                 'or under 4 s)'))
+        if any(fnmatch.fnmatch(name.lower(), p.lower()) for p in a.carried):
+            k = 'carried'
+            print(f'{name}: carried (said)')
+        else:
+            print(f'{name}: ' + (f'{k} (acceleration under 5 Hz {lf:.2f} m/s2)' if k else
+                                 'no verdict (no accelerometer, or under 4 s)'))
         if k:
             out[name.lower()] = k
     if a.out:

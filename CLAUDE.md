@@ -127,9 +127,14 @@ side by side in `out/<job>/4k/`.
 footage = ["/path/to/footage"]                    # folders (with subfolders) or clips
 camera = "carried"                                # in a hand or on a helmet, not flown (default "drone");
                                                   # "auto": per clip by its accelerometer (camera.py, GoPro)
+carried = ["GX*", "DJI_2000*"]                    # with "auto": clips carried, said (no accelerometer to tell)
+renders = 1                                       # Gyroflow renders at once (default 3), and the CPU steps'
+workers = 4                                       # processes (default half the CPUs): a machine others work on
 fpv = true                                        # FPV footage: the pilot, close passes (off unless said: you
                                                   # decide from the footage, the code never guesses it)
 lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log footage only
+lut_clips = ["DJI_2026*"]                         # the log clips when the others are not (a drone in D-Log M beside
+                                                  # hand cameras in normal colour); default every clip
 objects = true                                    # vehicles and animals (objects.py)
 sounds = true                                     # the clips' own sound (hear: pieces, --bites 2 on every edit)
 captions = true                                   # the footage in words every 3 s (cap: pieces, review in qc)
@@ -159,7 +164,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   musical hits); the hits are the mix's onsets and the bass booms (the sub-bass coming in after a gap: "cuts on
   the boom") together, `--booms` only the booms, `--no-booms` only the onsets.
 - People: `--people W` (0 ignores people, 4 counts them as much as piloting, -2 keeps them out of a nature edit
-  but for the editor's pieces: "us only in the fly-bys"), `--animals W` (0 when YOLO sees
+  but for the editor's pieces: "us only in the fly-bys"; the biggest person with the head out of the frame, by the
+  skeleton, counts against a shot: edit.py prints `heads cut off`), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
   `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another
   edit's main character counts like the pilot), `--peers` (look-alikes that must not stand in), `--avoid
@@ -221,7 +227,7 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   `captions.py --search "words"` and the timeline's `caption` column answer "where does he dance" without
   frame sheets; the model is small (2B), so a stretch found is a first answer, the sheet of that stretch the
   proof.
-- Picture: `--lut FILE.cube`, `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
+- Picture: `--lut FILE.cube` (`--lut-clips PATTERN ...`: only those clips are log), `--grade auto`, `--zoom Z`, `--match CLIP` (two cameras of one shoot: every other
   clip's colour matched to that clip's) (kept in the EDL for `final.py`).
 - `--plan-only`, `--debug`, `--height`, `--width` (a preview of another aspect: every clip cropped to it, never
   stretched; a 4:3 drone beside 16:9 hand cameras), `--fps`, `--brief` (no footage table: montage.py prints it for the first
@@ -263,7 +269,8 @@ tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
 - `gps.py CLIP` (where), `gps.py track` (speed, altitude, climb per GPS point; montage.py runs it on GoPro
   clips): a lift going up, a run going down, how fast.
 - `music_like.py LIKED.mp3 [--not DISLIKED.mp3]`: catalogue tracks that sound like the liked one (CLAP's music
-  model), downloaded into `models/music/catalogue/`; then `music_check.py`.
+  model), downloaded into `models/music/catalogue/`; then `music_check.py`. A liked track not in the catalogue:
+  `--bpm 128 --feels "Driving, Intense"`.
 - `objects.py --summary`, `qc.py EDL VIDEO`, `edl_sheet.py EDL OUT.jpg [--cuts]`, `final.py`, `dji_join.py`,
   `djimeta.py`.
 - `edl_edit.py`: a comment on one scene of a finished edit: `--replace K` (the same music, the rest frame for
