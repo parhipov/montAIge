@@ -5,6 +5,8 @@
 
 clips.txt: one clip path per line -> <stem>_stabilized.mp4 (whole clip).
 ranges.json: {"<clip path>": [[start_ms, end_ms], ...], ...} -> <stem>_stabilized-001.mp4 ... per range.
+--calls FILE: a JSON line per render, {clip, output, gyroflow (its version), args (Gyroflow's command line after its
+own path)}: how the render was made, for the index's recipe of a proxy.
 Gyroflow is taken from --gyroflow, then the GYROFLOW environment variable. It keeps the
 stabilization settings saved in its GUI; the bitrate is forced through encoder options because
 the CLI never goes below the source bitrate.
@@ -25,9 +27,15 @@ ap.add_argument('--bitrate', default='3M')
 ap.add_argument('--gyroflow', default=os.environ.get('GYROFLOW'))
 ap.add_argument('--codec', choices=('h264', 'hevc10'), default='h264',
                 help='hevc10: 10-bit H.265 (finals from log footage: no banding before the LUT)')
+ap.add_argument('--calls', default=None, help='a JSON line per render: how Gyroflow was called')
 a = ap.parse_args()
 if not a.gyroflow or not os.path.isfile(a.gyroflow):
     raise SystemExit('Gyroflow not found: pass --gyroflow or set GYROFLOW')
+version = None
+if a.calls:
+    out = subprocess.run([a.gyroflow, '--version'], capture_output=True, text=True, errors='replace',
+                         cwd=os.path.dirname(a.gyroflow)).stdout
+    version = next((x.split()[-1].lstrip('v') for x in out.splitlines() if x.startswith('Gyroflow v')), None)
 out_dir = os.path.abspath(a.out_dir)
 os.makedirs(out_dir, exist_ok=True)
 jobs = []
@@ -68,4 +76,8 @@ for clip, rr in jobs:
     stray = os.path.splitext(clip)[0] + '.gyroflow'
     if os.path.isfile(stray) and os.path.getmtime(stray) >= t0 - 1:
         os.remove(stray)                                         # Gyroflow sometimes leaves its project beside the clip
+    if a.calls:
+        with open(a.calls, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(dict(clip=clip, output=os.path.join(out_dir, stem + '_stabilized.mp4') if not rr else None,
+                                     gyroflow=version, args=cmd[1:]), ensure_ascii=False) + '\n')
     print(f'{stem}: {"%d ranges" % len(rr) if rr else "full"} in {time.time() - t0:.0f}s', flush=True)

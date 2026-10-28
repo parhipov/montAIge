@@ -2,6 +2,7 @@
 
     python people.py detect --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_people.npz
     python people.py track  --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_ptrack.npz, _tid.npy
+    python people.py embed  RENDER.mp4 [...]       CLIP of each person row -> <render>_pclip.npy, _pclipw.npy (wide)
     python people.py pilot  RENDER.mp4 [...] [--sheet check.jpg]                    -> <render>_pilot.npy
     python people.py passes --weights ... RENDER.mp4 [...]                           -> <render>_passes.npz
     python people.py subject RENDER.mp4 [...] --text "a woman pushing a baby stroller" [--text ...] [--not ...] [--tag NAME]
@@ -53,7 +54,6 @@ summary  One line per clip: people other than the pilot, pilot share, waving, fa
 Raw boxes and keypoints are never printed.
 """
 import argparse
-import glob
 import os
 import sys
 import time
@@ -324,8 +324,13 @@ def clip_probs(cache):
         return out / out.norm(dim=-1, keepdim=True)
 
     def probs(crops, texts):
+        """crops: PIL images, or their unit image embeddings (N, 512) kept from before."""
         with torch.no_grad():
             tf = feats(model.get_text_features(**proc(text=texts, return_tensors='pt', padding=True).to(dev)))
+        if isinstance(crops, np.ndarray):
+            e = torch.from_numpy(crops.astype(np.float32)).to(dev)
+            with torch.no_grad():
+                return (100.0 * e @ tf.T).softmax(-1).cpu().numpy()
         out = np.zeros((len(crops), len(texts)), np.float32)
         for b0 in range(0, len(crops), 64):
             batch = crops[b0:b0 + 64]
@@ -380,7 +385,9 @@ def find_subject(renders, cache, texts, row_thr=0.5, track_frac=0.3, sheet=None,
         if not len(z['frame']):
             np.save(subject_file(base, tag), np.zeros(0, bool))
             continue
-        p = probs(crops_at(r, z, pad=0.8, pad_y=0.15), list(texts) + neg)[:, :len(texts)].sum(-1)
+        wide = wide_embeddings(r, z)
+        p = probs(wide if wide is not None else crops_at(r, z, pad=0.8, pad_y=0.15),
+                  list(texts) + neg)[:, :len(texts)].sum(-1)
         strong = p > row_thr
         tid = tracks(z)
         sub = strong.copy()
@@ -395,6 +402,7 @@ def find_subject(renders, cache, texts, row_thr=0.5, track_frac=0.3, sheet=None,
         picks += [(float(p[i]), r, int(i)) for i in np.flatnonzero(strong)]
     print(f'subject {texts} (CLIP + tracks): {tot["by_clip"]} rows by CLIP, {tot["by_track"]} more by following '
           f'their tracks, of {tot["rows"]} people rows')
+    picks = [p for p in picks if os.path.exists(p[1])]   # a proxy that is not kept has no picture to show
     if sheet and picks:                                  # the most and the least confident picks, to check by eye
         picks.sort(reverse=True)
         sel = picks[:12] + picks[-12:] if len(picks) > 24 else picks
@@ -620,6 +628,29 @@ def person_embeddings(renders, feats):
         np.save(base + '_pclip.npy', e.astype(np.float16))
         out[r] = e
     return out
+
+
+def wide_embeddings(render, z):
+    """The kept CLIP embeddings of the widened crops (find_subject's) of a render's people rows, or None."""
+    p = os.path.splitext(render)[0] + '_pclipw.npy'
+    if os.path.exists(p):
+        e = np.load(p)
+        if len(e) == len(z['frame']):
+            return e.astype(np.float32)
+    return None
+
+
+def embed_people(renders, cache):
+    """CLIP of every person row, kept so that the questions about people need no picture: a tight crop (who)
+    -> <render>_pclip.npy, and one widened to what is beside the person (subject) -> <render>_pclipw.npy."""
+    feats = clip_image_feats(cache)
+    person_embeddings(renders, feats)
+    for r in renders:
+        z = np.load(os.path.splitext(r)[0] + '_people.npz')
+        if wide_embeddings(r, z) is None:
+            e = feats(crops_at(r, z, pad=0.8, pad_y=0.15)) if len(z['frame']) else np.zeros((0, 512), np.float32)
+            np.save(os.path.splitext(r)[0] + '_pclipw.npy', e.astype(np.float16))
+        print(f'{os.path.basename(r)}: {len(z["frame"])} people rows embedded', flush=True)
 
 
 def frames_at(render, wanted):
@@ -917,6 +948,8 @@ def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN, w
                 sel = (pk[:8] + pk[len(pk) // 2:len(pk) // 2 + 4] + pk[-8:]) if len(pk) > 20 else pk
             tiles = []
             for _, r, i in sel:
+                if not os.path.exists(r):                        # a proxy that is not kept
+                    continue
                 z = np.load(os.path.splitext(r)[0] + '_people.npz')
                 im = crops_at(r, {'frame': z['frame'][i:i + 1], 'box': z['box'][i:i + 1]}, pad=0.1)[0]
                 tiles.append(cv2.cvtColor(np.asarray(im.resize((72, 128))), cv2.COLOR_RGB2BGR))
@@ -928,7 +961,8 @@ def find_who(renders, cache, refs, sheet=None, sim=WHO_SIM, margin=WHO_MARGIN, w
             out.append(row)
         cv2.imwrite(sheet, np.vstack(out), [cv2.IMWRITE_JPEG_QUALITY, 85])
 
-    if weights and all(os.path.exists(os.path.splitext(r)[0] + '_tid.npy') for r in renders):
+    # by tracks, the screenshot found in the picture; without the proxies, by the kept embeddings alone
+    if weights and all(os.path.exists(os.path.splitext(r)[0] + '_tid.npy') and os.path.exists(r) for r in renders):
         res = find_who_tracked(renders, emb, feats, refs, weights)
         if res is not None:
             names = [n for n in names if not n.startswith('_')]
@@ -1324,8 +1358,8 @@ def summary(renders, tag=''):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('step', choices=('detect', 'track', 'pilot', 'pilotclip', 'subject', 'who', 'split', 'passes',
-                                     'summary'))
+    ap.add_argument('step', choices=('detect', 'track', 'embed', 'pilot', 'pilotclip', 'subject', 'who', 'split',
+                                     'passes', 'summary'))
     ap.add_argument('--k', type=int, default=3, help='split: number of looks')
     ap.add_argument('--keep', default=None, help='split: the groups that are the person, e.g. 0,2')
     ap.add_argument('--ref', action='append', default=[], help='who: NAME=IMAGE, a crop of that person (repeatable)')
@@ -1351,7 +1385,7 @@ def main():
     ap.add_argument('--sheet', default=None)
     ap.add_argument('--force', action='store_true', help='track: run again')
     a = ap.parse_args()
-    renders = sorted({os.path.normcase(p): p for r in a.renders for p in glob.glob(r)}.values())
+    renders = paths.expand(a.renders)
     if a.step in ('detect', 'passes'):
         gpu.device()
         from ultralytics import YOLO
@@ -1381,6 +1415,8 @@ def main():
             n = len(set(tid[tid >= 0].tolist()))
             print(f'{os.path.basename(r)}: {n} tracks over {int((tid >= 0).sum())} of {len(tid)} people rows in '
                   f'{time.time() - t0:.0f}s', flush=True)
+    elif a.step == 'embed':
+        embed_people(renders, a.clip_cache)
     elif a.step == 'pilot':
         find_pilot(renders, a.clusters, a.sheet)
     elif a.step == 'pilotclip':

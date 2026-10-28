@@ -163,12 +163,8 @@ def find(pairs, text, cache=None):
 def pairs_of(listfile, proxy_dir):
     with open(listfile, encoding='utf-8') as fh:
         clips = [x.strip() for x in fh if x.strip()]
-    out = []
-    for c in clips:
-        r = os.path.join(proxy_dir, os.path.splitext(os.path.basename(c))[0] + '_stabilized.mp4')
-        if os.path.exists(r):
-            out.append((c, r))
-    return out
+    # the sound is the original's: the proxy's path only names the feature files, the proxy need not be there
+    return [(c, os.path.join(proxy_dir, os.path.splitext(os.path.basename(c))[0] + '_stabilized.mp4')) for c in clips]
 
 
 def main():

@@ -13,7 +13,7 @@ the same folder.
 
 ```bash
 pip install -e /path/to/montAIge                    # or run from the repository: python -m embedia ...
-export GYROFLOW=/path/to/Gyroflow.exe               # proxies of clips with motion data (DJI, GoPro, .gcsv)
+export GYROFLOW=/path/to/Gyroflow.exe               # GoPro motion; stabilized proxies (stabilize = true)
 python -m embedia init trip/index --footage /path/to/footage [--camera carried] [--set captions=true]
 python -m embedia run trip/index                    # scan, proxies, features, timeline; skips what is done
 python -m embedia status trip/index
@@ -47,6 +47,7 @@ is for that lack its features, or have them from an older version of the step.
 | vis_motion | camera rotation from the picture, for clips with no gyro to read | `vis` | clips stabilized before |
 | gps | GoPro GPS: position, speed, altitude, climb | `gps` | GoPro clips |
 | people | poses (YOLOv8-pose) 2 a second, clothes colours, waving, facing | `people` | `people = true` |
+| pclip | CLIP of every person row: a tight crop and one with what is beside them (who, subject need no picture) | `pclip`, `pclipw` | `people = true` |
 | pilot, passes | the FPV pilot (goggles, a radio); flying close past, between legs, under, over | `pilot`, `passes` | `fpv = true`, flown clips |
 | track | every person through every other frame (BoT-SORT) | `ptrack`, `tid` | `track = true`, `who` |
 | objects | vehicles and animals | `objects` | `objects = true` |
@@ -55,9 +56,20 @@ is for that lack its features, or have them from an older version of the step.
 | speech | phrases with their words (Whisper), speakers (pyannote), voices across clips | `speech` | `speech = "ru"` |
 | captions | the picture in words every 3 s (Qwen3-VL 2B) | `captions` | `captions = true` |
 
-A feature is a file beside the clip's proxy, `proxy/<stem>_stabilized_<feature>.npz` (`.npy`, `.json`), read with
-`ix.get(clip, feature)`. Times are seconds of the original: a proxy is frame for frame with it (a Gyroflow render
-640 px wide of a clip with motion data, the clip scaled down otherwise). Boxes are shares of the proxy's frame.
+A feature is a file `proxy/<stem>_stabilized_<feature>.npz` (`.npy`, `.json`), read with `ix.get(clip, feature)`.
+Times are seconds of the original. The steps read a 640 px proxy, frame for frame with the original (4K HEVC
+10-bit decodes at ~36 fps on the CPU, a 640 px proxy at ~2500: one decode of the original serves every step). What it is, is the
+clip's frame, kept in its recipe (`ix.recipe(clip)`: `<stem>_stabilized_recipe.json`, with the size, fps, frame
+count and how Gyroflow was called) and in `clips.frame`:
+
+| frame | the proxy | boxes are shares of | when |
+|---|---|---|---|
+| `stabilized` | Gyroflow's render of a clip with motion data, kept | the stabilized frame | `stabilize = true` (default with `fpv`; the montage sets it) |
+| `as-is` | the original scaled down, made while a step reads the picture and removed after the run | the original's frame | otherwise, and clips stabilized before |
+
+Everything that answers works without the proxies: SQL, `search`, the questions. A stabilized render is never
+removed for a scaled one; when it is gone and `stabilize` is off, the clip is measured again as it is. A clip
+whose frame changes is measured again by the steps that read the picture, and its questions asked again.
 
 ## Questions
 
@@ -83,13 +95,13 @@ Rebuilt from the features after every run, except `features`, `questions`, `meta
 | table | columns |
 |---|---|
 | `t` | a row per clip per 0.5 s: `clip`, `t`, `frame`; GPS `speed` (km/h), `alt` (m), `climb` (m/s); `rot` (camera rotation, deg/s), `flow` (px per frame pair at 160 px), `parallax` (what a rotation cannot explain: close and fast), `bright` (0-255), `sharp` (Laplacian variance); `people` (count), `people_area` (the biggest), `facing`, `waving`; `vehicles`, `vehicle_area`, `animals`; a column per main character (their area, 0 out of view); `aes` (LAION aesthetic), `scenic` (the `beauty` question's views); `activity`, `activity_p`; `caption`; `voice`, `speech` (the phrase's words), `sung` |
-| `clips` | `clip`, `path` (the original), `render` (the proxy), `start` (ISO), `day`, `seconds`, `fps`, `gps` (share with a fix), `lat`, `lon`, `alt_min`, `alt_max`, `speed_p50` |
+| `clips` | `clip`, `path` (the original), `render` (the proxy, NULL when not kept), `frame` (`stabilized`, `as-is`), `start` (ISO), `day`, `seconds`, `fps`, `gps` (share with a fix), `lat`, `lon`, `alt_min`, `alt_max`, `speed_p50` |
 | `people` | a person seen (2 a second): `clip`, `t`, `frame`, `track` (-1 without `track`), `x`, `y`, `w`, `h` (centre, size), `area`, `facing`, `waving`, `name` (a main character or NULL) |
 | `labels` | a main character's rows (`who`, `subject`): `name`, `clip`, `t`, `frame`, `track`, `area` |
 | `passes` | close passes (`fpv`): `clip`, `t`, `kind` (between legs, under, over, past on its left / right, close; lying), `size`, `name` (who was passed) |
 | `captions` | `clip`, `t0`, `t1`, `text`; `captions_fts` searches it: `WHERE captions_fts MATCH 'jump*'` |
 | `phrases` | speech: `clip`, `t0`, `t1`, `voice`, `sung`, `snr`, `level`, `text`; `phrases_fts` as above |
-| `features` | `clip`, `step`, `version`, `made`, `embedia`: which step version and embedia version made a clip's features |
+| `features` | `clip`, `step`, `version`, `made`, `embedia`, `frame`: which step version and embedia version made a clip's features, on which frame |
 | `questions` | `kind`, `name`, `input` (JSON), `made`, `embedia` |
 | `meta` | `key`, `value`: `embedia_version`, `embedia_code` (git commit, +dirty), `created`, `built` |
 

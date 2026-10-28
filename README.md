@@ -121,7 +121,7 @@ Here the heavy part runs once and is kept, and a new question is a query over it
 
 ```mermaid
 flowchart LR
-  F["Footage"] --> R["Gyroflow<br/>stabilized proxies"]
+  F["Footage"] --> R["640 px proxies<br/>stabilized or as is"]
   subgraph I["embedia: the index"]
     R --> P["Local analysis<br/>motion, people, places,<br/>words, sounds, speech"]
   end
@@ -132,8 +132,9 @@ flowchart LR
   O -- "done" --> X["4K final"]
 ```
 
-Two parts. **embedia** (`embedia/`) turns footage into an index: a folder per shoot with the proxies, every
-feature of every clip and a SQLite database of them, asked in words or by example afterwards; it knows nothing
+Two parts. **embedia** (`embedia/`) turns footage into an index: a folder per shoot with every feature of every
+clip, links to the originals, a SQLite database of them, asked in words or by example afterwards, and the proxies
+when the clips are stabilized (the montage's are: it cuts its previews from them); it knows nothing
 of editing and can be used by any other project ([embedia/README.md](embedia/README.md)). **The montage**
 (`montaige/`) cuts edits to music from an index.
 
@@ -218,7 +219,7 @@ AGPL like the rest, and its README there gives the credits.
 | `sounds.py` | the clips' own sound in words (CLAP): laughter, a shout, a splash |
 | `speech.py` | what people say (Whisper) and who says it (pyannote: voices told apart across clips) |
 | `faces.py`, `smiles.py` | faces in the 4K originals; smiles at the camera |
-| `proxy.py`, `gf_render.py` | proxies: clips stabilized elsewhere scaled down; Gyroflow renders, frame for frame |
+| `proxy.py`, `gf_render.py` | proxies, frame for frame: the original scaled down as it is; Gyroflow's stabilized renders |
 | `dji_join.py` | joins split DJI recordings |
 
 `montaige/`, the montage:

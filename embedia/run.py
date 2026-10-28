@@ -10,6 +10,10 @@ embedia.toml (written by hand, by `python -m embedia init`, or by the montage fr
     camera = "drone"                         # "carried": in a hand, on a helmet, not flown (no pilot, no passes);
                                              # "auto": per clip by its accelerometer (camera.py, GoPro)
     gyroflow = "/path/to/Gyroflow.exe"       # or the GYROFLOW environment variable: proxies of clips with motion data
+    stabilize = false                        # true: clips with motion data are measured on Gyroflow's stabilized
+                                             # render, kept as their proxy; false: on the original as it is, scaled
+                                             # down while a step reads it, removed after the run (default: fpv's
+                                             # value; the montage sets true: it cuts previews from the proxies)
     renders = 3                              # Gyroflow renders at once
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
     people = true                            # poses, waving, facing the camera (default true)
@@ -31,11 +35,17 @@ Steps:
             and what would take it in ("not taken:", WARN where it may be footage: no motion data and not an ffmpeg
             export, or not mp4). Split DJI recordings are listed and the scan stops: they are joined (dji_join.py)
             only with join=True, after the owner of the footage said yes. -> originals.txt
-  proxies   whole-clip Gyroflow renders 640 px wide, several at once (gf_render.py); GoPro and .gcsv motion through
-            Gyroflow's export (gf_motion.py). A `_stabilized` clip without its original (stabilized before, no motion
-            data left) is only scaled down (proxy.py); its motion comes from the picture (vis_motion.py)
-  features  the analyzers of STEPS, each on the clips it is for and that lack its features or have them from an
-            older version of the step (`features` in embedia.sqlite)
+  proxies   640 px wide, several at once: with `stabilize`, whole-clip Gyroflow renders (gf_render.py) of the clips
+            with motion data, kept; otherwise the original scaled down (proxy.py), made when a step reads the
+            picture and removed after the run. A `_stabilized` clip without its original (stabilized before, no
+            motion data left) is always scaled; its motion comes from the picture (vis_motion.py). GoPro and .gcsv
+            motion through Gyroflow's export (gf_motion.py) either way. Beside each clip's features its recipe
+            (<stem>_stabilized_recipe.json): the frame they are measured on ("stabilized" | "as-is"), the
+            proxy's size, fps, frame count, how Gyroflow was called
+  features  the analyzers of STEPS, each on the clips it is for and that lack its features, have them from an
+            older version of the step (`features` in embedia.sqlite), or measured on another frame (a picture
+            step: the clip is now stabilized, or its stabilized render is gone); the questions' answers of a clip
+            measured again go, to be asked again
   questions the questions asked before (who, subject, beauty, activities) asked again when a clip lacks its answer
   timeline  timeline.py: every feature on one grid in embedia.sqlite, for questions across them
 """
@@ -277,27 +287,86 @@ def gyroflow_exe(ix):
     return g
 
 
-def proxies(ix):
-    clips = ix.originals()
-    os.makedirs(ix.proxy_dir, exist_ok=True)
-    os.makedirs(ix.log_dir, exist_ok=True)
-    todo = [c for c in clips if not os.path.exists(ix.render(c))]
+def stabilize(cfg):
+    """Clips with motion data are measured on Gyroflow's stabilized render, kept as their proxy (`stabilize = true`;
+    the default with `fpv = true`; the montage sets it), or on the original as it is, scaled down only while a step
+    reads the picture (the default)."""
+    return bool(cfg.get('stabilize', cfg.get('fpv', False)))
+
+
+def frame_for(ix, c):
+    """What a clip is measured on now: 'stabilized' (Gyroflow's render) or 'as-is' (the original scaled down). A
+    stabilized render that is there stays what its clip is measured on: it is never given up for a scaled one."""
+    if stabilized_before(c):
+        return 'as-is'
+    if stabilize(ix.cfg) or ix.frame_kind(c) == 'stabilized' and os.path.exists(ix.render(c)):
+        return 'stabilized'
+    return 'as-is'
+
+
+def write_recipe(ix, c, tool, call=None):
+    """The clip's recipe beside its features: the frame they are measured on, the proxy's size, fps and frame count
+    (the timeline reads them when the proxy is gone), when the recording began, how Gyroflow was called."""
+    from embedia.read import creation_time
+    with av.open(ix.render(c)) as ct:
+        st = ct.streams.video[0]
+        n, fps, w, h = st.frames, float(st.average_rate), st.codec_context.width, st.codec_context.height
+    here = os.path.exists(c)
+    rec = dict(frame='stabilized' if tool == 'gf_render' else 'as-is', tool=tool, width=w, height=h, frames=n,
+               fps=fps, original=c, size=os.path.getsize(c) if here else None,
+               start=creation_time(c).isoformat() if here else None,
+               gyroflow=dict(version=call.get('gyroflow'), args=call.get('args')) if call else None)
+    with open(ix.path(c, 'recipe'), 'w', encoding='utf-8') as fh:
+        json.dump(rec, fh, ensure_ascii=False, indent=1)
+
+
+def adopt_recipes(ix):
+    """Recipes of the proxies made before the index kept them: a clip with motion data was rendered by Gyroflow."""
+    for c in ix.originals():
+        if os.path.exists(ix.render(c)) and not ix.has(c, 'recipe'):
+            write_recipe(ix, c, 'proxy' if stabilized_before(c) else 'gf_render')
+
+
+def motion(ix, clips):
+    """GoPro and .gcsv motion through Gyroflow's export (gf_motion.py), once per clip, whatever it is measured on."""
     gopro = [c for c in clips if gyroflow_motion(c, ix.cache_dir) and not os.path.exists(
         os.path.join(ix.cache_dir, ix.stem(c) + '_gyroflow_camera.json'))]
-    if any(not stabilized_before(c) for c in todo) or gopro:
-        gyroflow_exe(ix)
     if gopro:
+        gyroflow_exe(ix)
         lst = os.path.join(ix.log_dir, 'gopro.txt')
         open(lst, 'w', encoding='utf-8').write('\n'.join(gopro) + '\n')
         run('gf_motion', [ix.cache_dir, '--list', lst])
-    by_size = {}
+
+
+def proxies(ix, clips=None):
+    """Proxies of the clips (all by default) that lack one, 640 px wide, several at once: Gyroflow's render of a
+    clip measured stabilized (gf_render.py), the original scaled down otherwise (proxy.py); a recipe beside each.
+    A scaled proxy of a clip now to be measured stabilized goes first. An original not there is skipped."""
+    clips = ix.originals() if clips is None else clips
+    os.makedirs(ix.proxy_dir, exist_ok=True)
+    os.makedirs(ix.log_dir, exist_ok=True)
+    adopt_recipes(ix)
+    for c in clips:
+        if ix.frame_kind(c) == 'as-is' and frame_for(ix, c) == 'stabilized' and os.path.exists(ix.render(c)):
+            os.remove(ix.render(c))
+    gone = [c for c in clips if not os.path.exists(ix.render(c)) and not os.path.exists(c)]
+    if gone:
+        print(f'  WARN proxies: {len(gone)} originals not found (a disk not connected?): '
+              + ', '.join(ix.stem(c) for c in gone[:5]))
+    here = [c for c in clips if os.path.exists(c)]
+    motion(ix, here)
+    todo = [c for c in here if not os.path.exists(ix.render(c))]
+    by_size, tool_of = {}, {}
     for c in todo:
         with av.open(c) as ct:
             cc = ct.streams.video[0].codec_context
             h = int(round(PROXY_W * cc.height / cc.width / 2)) * 2
-        # Gyroflow renders the originals; a clip stabilized before is only scaled down (proxy.py)
-        by_size.setdefault((h, 'proxy' if stabilized_before(c) else 'gf_render'), []).append(c)
+        tool_of[c] = 'gf_render' if frame_for(ix, c) == 'stabilized' else 'proxy'
+        by_size.setdefault((h, tool_of[c]), []).append(c)
+    if 'gf_render' in tool_of.values():
+        gyroflow_exe(ix)
     n = int(ix.cfg.get('renders', 3))
+    calls = {}
     for (h, tool), cl in by_size.items():
         procs = []
         for k in range(n):
@@ -307,20 +376,41 @@ def proxies(ix):
             lst = os.path.join(ix.log_dir, f'{tool}_{h}_{k}.txt')
             open(lst, 'w', encoding='utf-8').write('\n'.join(part) + '\n')
             log = open(os.path.join(ix.log_dir, f'{tool}_{h}_{k}.log'), 'a', encoding='utf-8')
+            cf = os.path.join(ix.log_dir, f'{tool}_{h}_{k}_calls.jsonl')
+            if os.path.exists(cf):
+                os.remove(cf)
             cmd = command(tool, [ix.proxy_dir, '--list', lst, '--width', PROXY_W, '--height', h]
-                          + (['--bitrate', '3M'] if tool == 'gf_render' else []))
-            procs.append(subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT, env=env()))
+                          + (['--bitrate', '3M', '--calls', cf] if tool == 'gf_render' else []))
+            procs.append((subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT, env=env()), cf))
         t0 = time.time()
         print(f'{tool}: {len(cl)} clips at {PROXY_W}x{h}, {len(procs)} at once', flush=True)
-        for p in procs:
+        for p, cf in procs:
             p.wait()
+            if os.path.exists(cf):
+                with open(cf, encoding='utf-8') as fh:
+                    calls.update({os.path.normcase(x['clip']): x for x in map(json.loads, fh)})
         print(f'{tool}: done in {time.time() - t0:.0f}s')
-    bad = [c for c in clips if os.path.exists(ix.render(c)) and not has_picture(ix.render(c))]
+    bad = [c for c in todo if os.path.exists(ix.render(c)) and not has_picture(ix.render(c))]
     for c in bad:
         os.replace(ix.render(c), failed_render(ix, c))
         print(f'  {os.path.basename(c)}: no picture in its render (see the logs in {ix.log_dir}): left out')
     if bad:
-        ix.write_originals([c for c in clips if c not in bad])
+        ix.write_originals([c for c in ix.originals() if c not in bad])
+    for c in todo:
+        if c not in bad and os.path.exists(ix.render(c)):
+            write_recipe(ix, c, tool_of[c], calls.get(os.path.normcase(os.path.abspath(c))))
+
+
+def tidy(ix):
+    """After a run: the proxies of the clips measured as they are go, their recipes stay (made again when a step
+    needs the picture), unless `stabilize = true` keeps every proxy. A stabilized render always stays."""
+    if stabilize(ix.cfg):
+        return
+    gone = [c for c in ix.originals() if ix.frame_kind(c) == 'as-is' and os.path.exists(ix.render(c))]
+    for c in gone:
+        os.remove(ix.render(c))
+    if gone:
+        print(f'proxies: {len(gone)} of clips measured as they are removed (made again when a step reads the picture)')
 
 
 # ------------------------------------------------------------------------------------------- features
@@ -329,11 +419,13 @@ class Step:
     get none, e.g. no GPS fix), which clips it is for, when it runs at all (`on`: from embedia.toml), and its
     command over the clips that need it (`cmd(ix, srcs, renders)`). A higher `version` makes the features of the
     older one stale: they are made again. `whole`: the step takes every clip it is for each time it runs (it
-    joins them: voices across clips)."""
+    joins them: voices across clips). `picture`: it reads the proxies (made for it where gone; measured again when
+    the clip's frame changes); the others read the originals' sound and metadata."""
     def __init__(self, name, version, outputs, cmd, on=lambda cfg: True, clips='all', whole=False, optional=False,
-                 py=None, files=()):
+                 py=None, files=(), picture=True):
         self.name, self.version, self.outputs, self.cmd, self.on = name, version, outputs, cmd, on
         self.clips, self.whole, self.optional, self.py, self.files = clips, whole, optional, py, files
+        self.picture = picture
 
 
 def yolo(name):
@@ -373,14 +465,17 @@ def language(cfg):
 
 STEPS = [
     Step('cameras', 1, (), lambda ix, s, r: ['--list', ix.originals_txt, '--out', os.path.join(ix.root, 'cameras.json')],
-         on=lambda c: c.get('camera') == 'auto', whole=True, files=('cameras.json',)),
+         on=lambda c: c.get('camera') == 'auto', whole=True, files=('cameras.json',), picture=False),
     Step('analyze', 1, ('flow', 'look'), lambda ix, s, r: r),
     Step('vis_motion', 1, ('vis',), lambda ix, s, r: r + (['--hfov', ix.cfg['hfov']] if ix.cfg.get('hfov') else []),
          clips='picture'),
     Step('gps', 1, ('gps',), lambda ix, s, r: ['track', '--list', lst(ix, 'gps', s), '--proxy-dir', ix.proxy_dir],
-         clips='gopro', optional=True),
+         clips='gopro', optional=True, picture=False),
     Step('people', 1, ('people',), lambda ix, s, r: ['detect'] + r + ['--weights', yolo('yolov8s-pose.pt'),
                                                                       '--objects', yolo('yolov8s.pt')],
+         on=lambda c: c.get('people', True)),
+    # CLIP of each person row (tight, and widened for subject): who and subject then need no picture
+    Step('pclip', 1, ('pclip', 'pclipw'), lambda ix, s, r: ['embed'] + r + ['--clip-cache', clip_cache()],
          on=lambda c: c.get('people', True)),
     Step('pilot', 1, ('pilot',), lambda ix, s, r: ['pilotclip'] + r + [
         '--clip-cache', clip_cache(), '--sheet', sheet(ix, 'pilot_check.jpg')],
@@ -395,13 +490,14 @@ STEPS = [
     Step('places', 1, ('clip',), lambda ix, s, r: ['embed'] + r + ['--clip-cache', clip_cache()],
          on=lambda c: c.get('places', True)),
     Step('sounds', 1, ('clap',), lambda ix, s, r: ['embed', '--list', lst(ix, 'sounds', s), '--proxy-dir', ix.proxy_dir],
-         on=lambda c: c.get('sounds', False)),
+         on=lambda c: c.get('sounds', False), picture=False),
     Step('speech', 1, ('speech',), lambda ix, s, r: ['run', '--list', ix.originals_txt, '--proxy-dir', ix.proxy_dir,
                                                      '--out', ix.root] + language(ix.cfg),
-         on=lambda c: bool(c.get('speech')), whole=True, optional=True, py='speech'),
+         on=lambda c: bool(c.get('speech')), whole=True, optional=True, py='speech', picture=False),
     Step('captions', 1, ('captions',), lambda ix, s, r: r, on=lambda c: c.get('captions', False)),
 ]
-MODULE = {'cameras': 'camera', 'pilot': 'people', 'passes': 'people', 'track': 'people', 'sounds': 'sounds'}
+MODULE = {'cameras': 'camera', 'pilot': 'people', 'passes': 'people', 'track': 'people', 'pclip': 'people',
+          'sounds': 'sounds'}
 
 
 def step_clips(ix, step, kinds):
@@ -420,6 +516,7 @@ def stale(ix, step, srcs):
     """The clips whose features of the step are missing or from an older version of it. A clip with the features
     and no record (made before the index kept records) is taken as made by this version."""
     made = ix.made(step.name)
+    on = ix.made_on(step.name)
     out, adopt = [], []
     for c in srcs:
         v = made.get(ix.stem(c))
@@ -427,11 +524,35 @@ def stale(ix, step, srcs):
                                                                 for f in step.files)
         if v is None:
             (adopt if have and step.outputs else out).append(c)
-        elif v < step.version or not (have or step.optional):
+        elif v < step.version or not (have or step.optional) or step.picture and moved(ix, c, on):
             out.append(c)
     if adopt:
-        ix.record(step.name, step.version, adopt)
+        ix.record(step.name, step.version, adopt, step.picture)
     return out
+
+
+def moved(ix, c, on):
+    """The clip's features of a step were measured on another frame than the clip is measured on now (on: the
+    step's ix.made_on; a record without a frame is from before frames were kept: as now)."""
+    was = on.get(ix.stem(c))
+    return was is not None and was != frame_for(ix, c)
+
+
+# which steps a question's answers are made from: a clip measured again by one of them is asked again
+ASKED_OF = {'who': ('people', 'pclip', 'track'), 'subject': ('people', 'pclip'), 'beauty': ('places',),
+            'activities': ('places',)}
+
+
+def forget(ix, again):
+    """{step: clips measured again} -> the answers of the questions made from those steps go, for those clips."""
+    for q in ix.questions():
+        clips = {c for s in ASKED_OF.get(q['kind'], ()) for c in again.get(s, ())}
+        if q['kind'] not in QUESTIONS or not clips:
+            continue
+        for c in clips:
+            for f in QUESTIONS[q['kind']][0](ix, q['input'], q['name']):
+                if ix.has(c, f):
+                    os.remove(ix.path(c, f))
 
 
 def drop(ix, step, srcs):
@@ -450,13 +571,13 @@ def carried_pilot(ix, kinds):
 
 
 def features(ix, only=None, redo=()):
-    """Every step of STEPS that embedia.toml turns on, over the clips it is for that need it."""
-    renders = ix.renders()
-    missing = [r for r in renders if not os.path.exists(r)]
-    if missing:
-        raise SystemExit(f'{len(missing)} proxies missing, e.g. {missing[0]}: run the proxies step')
+    """Every step of STEPS that embedia.toml turns on, over the clips it is for that need it; a step that reads the
+    picture gets the proxies it lacks first."""
+    os.makedirs(ix.proxy_dir, exist_ok=True)
+    adopt_recipes(ix)
     log = os.path.join(ix.log_dir, 'features.log')
     ran = False
+    again = {}
     for step in STEPS:
         if only and step.name not in only or not step.on(ix.cfg):
             continue
@@ -475,16 +596,26 @@ def features(ix, only=None, redo=()):
             from embedia import gpu
             gpu.device()
             ran = True
-        drop(ix, step, [c for c in todo if ix.made(step.name).get(ix.stem(c), step.version) < step.version])
+        on = ix.made_on(step.name)
+        old = [c for c in todo if ix.made(step.name).get(ix.stem(c), step.version) < step.version
+               or step.picture and moved(ix, c, on)]
+        drop(ix, step, old)
+        again[step.name] = srcs if step.name in redo else old
         take = srcs if step.whole else todo
+        if step.picture:
+            proxies(ix, take)
+            take = [c for c in take if os.path.exists(ix.render(c))]
+            if not take:
+                continue
         py = speech_py(ix) if step.py == 'speech' else None
         rc = run(MODULE.get(step.name, step.name), step.cmd(ix, take, [ix.render(c) for c in take]), log, py)
         if rc:
             raise SystemExit(f'{step.name} failed: see {log}')
         done = [c for c in take if step.optional or all(ix.has(c, o) for o in step.outputs)]
-        ix.record(step.name, step.version, done)
+        ix.record(step.name, step.version, done, step.picture)
         if step.name == 'speech':
             voices(ix)
+    forget(ix, again)
     if ix.cfg.get('people', True) and ix.cfg.get('fpv', False):
         carried_pilot(ix, camera_kinds(ix))
 
@@ -508,7 +639,9 @@ def who_answers(ix, inp, name=''):
 def who_cmd(ix, inp, name=''):
     refs = [x for n, items in inp.items() for p in ([items] if isinstance(items, str) else items)
             for x in ('--ref', f'{n}={p}')]
-    # the person on a screenshot found in the footage brings their whole track: people.py track first
+    # the person on a screenshot is found in the picture and brings their whole track: the proxies, people.py track
+    # first (without the originals, who goes by the kept embeddings alone)
+    proxies(ix)
     track = STEPS[[s.name for s in STEPS].index('track')]
     todo = stale(ix, track, ix.originals())
     if todo and run('people', track.cmd(ix, todo, [ix.render(c) for c in todo]), log_of(ix)):
@@ -518,14 +651,19 @@ def who_cmd(ix, inp, name=''):
                                             '--clip-cache', clip_cache(), '--sheet', sheet(ix, 'who_check.jpg')]
 
 
+def subject_cmd(ix, inp, name=''):
+    # the widened crops' embeddings are kept by the pclip step; a clip measured before it needs its picture
+    proxies(ix, [c for c in ix.originals() if not ix.has(c, 'pclipw')])
+    return (['subject'] + ix.renders() + [x for t in inp['texts'] for x in ('--text', t)]
+            + [x for t in inp.get('nots', []) for x in ('--not', t)] + (['--tag', name] if name else [])
+            + ['--clip-cache', clip_cache(), '--sheet', sheet(ix, f'subject_{name or "check"}.jpg')])
+
+
 QUESTIONS = {
     # main characters by example: {name: [screenshots or CLIP:SECONDS:X]}, _name somebody else (people.py who)
     'who': (who_answers, who_cmd, 'people'),
     # a main character in words: {texts, nots} (people.py subject --tag NAME)
-    'subject': (lambda ix, inp, name='': [f'subject_{name}' if name else 'subject'],
-                lambda ix, inp, name='': ['subject'] + ix.renders() + [x for t in inp['texts'] for x in ('--text', t)]
-                + [x for t in inp.get('nots', []) for x in ('--not', t)] + (['--tag', name] if name else [])
-                + ['--clip-cache', clip_cache(), '--sheet', sheet(ix, f'subject_{name or "check"}.jpg')], 'people'),
+    'subject': (lambda ix, inp, name='': [f'subject_{name}' if name else 'subject'], subject_cmd, 'people'),
     # beautiful views in the job's words: {texts, plain} (beauty.py)
     'beauty': (lambda ix, inp, name='': ['beauty'],
                lambda ix, inp, name='': ix.renders() + [x for t in inp['texts'] for x in ('--text', t)]
@@ -592,7 +730,8 @@ def everything(ix, join=False, only=None, redo=()):
     """scan, proxies, features, the questions again, the timeline: each skips what is done."""
     t0 = time.time()
     scan(ix, join)
-    proxies(ix)
+    if stabilize(ix.cfg):                                        # kept: every clip has its proxy
+        proxies(ix)
     analyze(ix, only, redo)
     print(f'embedia: {len(ix.originals())} clips in {time.time() - t0:.0f}s -> {ix.root}')
 
@@ -600,4 +739,5 @@ def everything(ix, join=False, only=None, redo=()):
 def analyze(ix, only=None, redo=()):
     features(ix, only, redo)
     reask(ix)
+    tidy(ix)
     timeline(ix)

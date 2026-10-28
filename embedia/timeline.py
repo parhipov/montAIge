@@ -9,7 +9,8 @@ seconds, beside the index's own (features, questions), which a rebuild keeps. A 
     SELECT clip, t, speed, marina, scenic FROM t WHERE marina > 0.01 AND speed > 20 ORDER BY scenic DESC
 
 Tables:
-  clips   one row per clip: clip, path, render, start (ISO, chapters of a split recording included), day,
+  clips   one row per clip: clip, path, render (the proxy, NULL when it is not kept), frame (what the
+          features were measured on: stabilized, as-is), start (ISO, chapters of a split recording included), day,
           seconds, fps, gps (share of time with a fix), lat, lon, alt_min, alt_max, speed_p50 (km/h)
   t       one row per clip per 0.5 s (the CLIP samples): clip, t (s), frame; speed (km/h), alt (m), climb (m/s,
           + up) from the GPS (NULL without a fix); rot (visible camera rotation, deg/s), flow, parallax (resid90),
@@ -93,20 +94,19 @@ TABLES = ('captions_fts', 'phrases_fts', 'clips', 't', 'people', 'labels', 'pass
 
 
 def build(ix, clip_cache=None):
-    import av
+    import datetime
     from embedia import read
     from embedia import speech
     proxy, cache = ix.proxy_dir, ix.cache_dir
-    srcs = ix.originals()
-    renders = ix.renders()
-    pairs = [(s, r) for s, r in zip(srcs, renders) if os.path.exists(r)]
+    pairs = ix.measured()                                        # the features, not the proxies: those may be gone
     names = sorted({n for _, r in pairs for n in subject_names(os.path.splitext(r)[0])})
     acts = activity_labels([r for _, r in pairs], clip_cache or os.path.join(paths.MODELS, 'clip'))
     dst = ix.db_path
     db = ix.db()
     for t in TABLES:                                             # the full-text tables first: they read the others
         db.execute(f'DROP TABLE IF EXISTS {t}')
-    db.execute('CREATE TABLE clips (clip TEXT PRIMARY KEY, path TEXT, render TEXT, start TEXT, day TEXT, seconds REAL, '
+    db.execute('CREATE TABLE clips (clip TEXT PRIMARY KEY, path TEXT, render TEXT, frame TEXT, start TEXT, day TEXT, '
+               'seconds REAL, '
                'fps REAL, gps REAL, lat REAL, lon REAL, alt_min REAL, alt_max REAL, speed_p50 REAL)')
     cols = ['clip TEXT', 't REAL', 'frame INTEGER', 'speed REAL', 'alt REAL', 'climb REAL', 'rot REAL', 'flow REAL',
             'parallax REAL', 'bright REAL', 'sharp REAL', 'people INTEGER', 'people_area REAL', 'facing INTEGER',
@@ -130,9 +130,7 @@ def build(ix, clip_cache=None):
     for src, r in pairs:
         clip = os.path.splitext(os.path.basename(src))[0]
         base = os.path.splitext(r)[0]
-        with av.open(r) as c:
-            st = c.streams.video[0]
-            n, fps = st.frames, float(st.average_rate)
+        n, fps = ix.frames(src)
         grid = np.arange(0, n, max(int(round(GRID_S * fps)), 1))
         tt = grid / fps
         row = {'clip': [clip] * len(grid), 't': np.round(tt, 2), 'frame': grid}
@@ -247,9 +245,10 @@ def build(ix, clip_cache=None):
                 vals.append(v)
             data.append(vals)
         db.executemany(f'INSERT INTO t VALUES ({",".join("?" * len(keys))})', data)
-        when = read.creation_time(src)
-        db.execute('INSERT INTO clips VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (clip, src, r, when.isoformat(), when.date().isoformat(), n / fps, fps, share, lat, lon, amin, amax,
+        rec = ix.recipe(src) or {}
+        when = datetime.datetime.fromisoformat(rec['start']) if rec.get('start') else read.creation_time(src)
+        db.execute('INSERT INTO clips VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (clip, src, r if os.path.exists(r) else None, rec.get('frame'), when.isoformat(), when.date().isoformat(), n / fps, fps, share, lat, lon, amin, amax,
                     sp50))
     db.execute('CREATE INDEX t_clip ON t (clip, t)')
     db.execute('CREATE INDEX people_clip ON people (clip, t)')

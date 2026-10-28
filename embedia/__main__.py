@@ -3,7 +3,8 @@
     python -m embedia init INDEX --footage DIR [DIR ...] [--camera drone|carried|auto] [--set KEY=VALUE ...]
     python -m embedia run INDEX [--join]            scan, proxies, features, questions again, timeline
     python -m embedia scan INDEX [--join]           (--join: split DJI recordings are joined; ask the owner first)
-    python -m embedia proxies INDEX
+    python -m embedia proxies INDEX                 every clip's proxy (scaled ones go again after a run without
+                                                    stabilize = true)
     python -m embedia analyze INDEX [--only STEP] [--redo STEP]     features, questions again, timeline
     python -m embedia status INDEX                  clips, which steps are done, the questions asked
     python -m embedia schema INDEX                  the database's tables, columns, rows (README: what they mean)
@@ -45,8 +46,10 @@ def value(v):
 def status(ix):
     srcs = ix.originals()
     have = sum(os.path.exists(ix.render(s)) for s in srcs)
+    kinds = [ix.frame_kind(s) or 'not measured' for s in srcs]
     m = ix.meta()
-    print(f'{ix.root}: {len(srcs)} clips, {have} proxies; built {m.get("built", "never")} by embedia '
+    print(f'{ix.root}: {len(srcs)} clips (' + ', '.join(f'{kinds.count(k)} {k}' for k in sorted(set(kinds)))
+          + f'), {have} proxies kept; built {m.get("built", "never")} by embedia '
           f'{m.get("embedia_version", "?")} ({m.get("embedia_code") or "no git"}); this is {embedia.__version__}')
     for st in er.STEPS:
         if not st.on(ix.cfg):
@@ -156,6 +159,7 @@ def main():
         else:
             inp, name = dict(texts=a.text), ''
         if er.ask(ix, a.cmd, inp, name):
+            er.tidy(ix)
             er.timeline(ix)
         else:
             print(f'{a.cmd} {name}: asked before with this input, answered for every clip')

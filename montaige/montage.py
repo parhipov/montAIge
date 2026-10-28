@@ -139,13 +139,15 @@ def run(args, log=None, py=None):
 
 # ------------------------------------------------------------------------------------------- the index
 # the job file's keys that describe the footage and the analyzers: the index's (embedia.toml)
-INDEX_KEYS = ('footage', 'camera', 'gyroflow', 'renders', 'hfov', 'people', 'fpv', 'track', 'objects', 'places',
-              'sounds', 'captions', 'speech', 'speech_py')
+INDEX_KEYS = ('footage', 'camera', 'gyroflow', 'stabilize', 'renders', 'hfov', 'people', 'fpv', 'track', 'objects',
+              'places', 'sounds', 'captions', 'speech', 'speech_py')
 
 
 def index_of(job, out):
-    """The job's index: out/<job>/index (or `index = ...`), its embedia.toml written from the job file."""
+    """The job's index: out/<job>/index (or `index = ...`), its embedia.toml written from the job file. The montage
+    cuts its previews from the proxies: they are stabilized and kept."""
     cfg = {k: job[k] for k in INDEX_KEYS if k in job}
+    cfg.setdefault('stabilize', True)
     if job.get('who'):                                           # a screenshot's person is found along their track
         cfg['track'] = True
     return embedia.create(job.get('index') or os.path.join(out, 'index'), cfg)

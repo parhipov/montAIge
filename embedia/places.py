@@ -29,7 +29,6 @@ activities What happens in the footage, from a general list (ACTIVITIES, plus --
 --sheet saves frames of what was found, to confirm by eye once.
 """
 import argparse
-import glob
 import os
 import sys
 
@@ -184,10 +183,11 @@ def stretches(p, t):
 
 
 def sheet_of(items, path, per_row=8):
-    """items: (render, seconds, label) -> one tile each (render None: an empty tile, to start a new row)."""
+    """items: (render, seconds, label) -> one tile each (render None: an empty tile, to start a new row; an
+    empty one too where the proxy is not kept)."""
     tiles = []
     for render, sec, label in items:
-        if render is None:
+        if render is None or not os.path.exists(render):       # a new row, or a proxy that is not kept
             tiles.append(np.zeros((150, 200, 3), np.uint8))
             continue
         c = av.open(render)
@@ -359,7 +359,7 @@ def main():
     ap.add_argument('--within', type=float, default=20.0, help='route: seconds from one place to the next')
     ap.add_argument('--sheet', default=None)
     a = ap.parse_args()
-    renders = sorted({os.path.normcase(p): p for r in a.renders for p in glob.glob(r)}.values())
+    renders = paths.expand(a.renders)
     mdl = model_of(a.clip_cache)
     data = {r: embed(r, mdl) for r in renders}
     if a.step == 'embed':

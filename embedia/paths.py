@@ -15,5 +15,16 @@ def _up(name):
         d = os.path.dirname(d)
 
 
+def expand(args):
+    """Paths from a command line: wildcards expanded, a plain path kept even when its file is gone (a proxy that
+    is not kept: its features are beside where it was)."""
+    import glob
+    out = {}
+    for a in args:
+        for p in (glob.glob(a) if glob.has_magic(a) else [a]):
+            out[os.path.normcase(p)] = p
+    return sorted(out.values())
+
+
 MODELS = _up('models')
 ROOT = os.path.dirname(MODELS)          # ai_montage/

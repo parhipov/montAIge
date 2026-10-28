@@ -17,7 +17,7 @@ docs/notes.md               methods, measurements, ideas not done yet
 docs/examples/<job>.md      early jobs: footage, task, edits, comments, what it taught (new ones: out/<job>/)
 models/                     inputs that are not footage (not in git): music/, luts/, yolo/, clip/, faces/
 out/<job>/                  a job (not in git): job.toml, previews, EDLs, QC, a snapshot of embedia/ and montaige/
-out/<job>/index/            its index: embedia.toml, originals.txt, proxy/ (proxies and their features), cache/,
+out/<job>/index/            its index: embedia.toml, originals.txt, proxy/ (features, recipes, stabilized proxies), cache/,
                             checks/ (*_check.jpg), voices/, embedia.sqlite (the timeline, questions asked)
 LOCAL.md                    this machine: tool paths, footage folders of the jobs (not in git)
 ```

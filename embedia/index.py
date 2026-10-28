@@ -16,16 +16,20 @@ Layout (every path from here):
                     its input, asked again for clips added later; the timeline tables (timeline.py: t, clips, people,
                     labels, passes, captions, phrases), rebuilt from the features after every run; `meta`: the
                     embedia version and code that built it, when
-  proxy/            per clip <stem>_stabilized.mp4: 640 px wide, frame for frame with the original (a Gyroflow render
-                    of a clip with motion data, the original scaled down otherwise), and its features beside it:
-                    <stem>_stabilized_<feature>.npz | .npy | .json
+  proxy/            per clip its features, <stem>_stabilized_<feature>.npz | .npy | .json, and the frame they were
+                    measured on, <stem>_stabilized_recipe.json: "stabilized" (a Gyroflow render of a clip with motion
+                    data, `stabilize = true`: the proxy <stem>_stabilized.mp4 is kept, how Gyroflow was called is
+                    in the recipe) or "as-is" (the original scaled down: a proxy only while a step reads the
+                    picture, removed after the run unless `stabilize = true`); its size, fps, frame count. A proxy
+                    is 640 px wide and frame for frame with the original
   cache/            camera motion read from the originals (DJI quaternions, Gyroflow's export of GoPro motion)
   checks/           sheets to confirm a detector by eye once: pilot_check.jpg, passes_check.jpg, who_check.jpg...
   refs/             the reference crops `who` cut from the footage
   voices/, voices.json, transcript.txt     speech.py: the voices told apart, each to listen to
   cameras.json      camera.py's verdict per clip (camera = "auto")
   log/              what the steps printed
-Times are seconds of the original (the proxy is frame for frame with it); boxes are shares of the proxy's frame.
+Times are seconds of the original (the proxy is frame for frame with it); boxes are shares of the frame the clip
+was measured on: the original's for "as-is", the stabilized render's for "stabilized".
 """
 import builtins
 import datetime
@@ -41,11 +45,11 @@ VERSION = '0.1.0'       # embedia's own (pyproject.toml's too): in `meta` and on
 CONFIG = 'embedia.toml'
 DB = 'embedia.sqlite'
 # a feature's file next to its proxy: .npz unless listed here
-SUFFIX = {'pilot': '.npy', 'pilotclip': '.npy', 'notperson': '.npy', 'pclip': '.npy', 'tid': '.npy',
-          'speech': '.json'}
+SUFFIX = {'pilot': '.npy', 'pilotclip': '.npy', 'notperson': '.npy', 'pclip': '.npy', 'pclipw': '.npy',
+          'tid': '.npy', 'speech': '.json', 'recipe': '.json'}
 # the tables that stay when timeline.py rebuilds the rest
 PERSISTENT = ('CREATE TABLE IF NOT EXISTS features (clip TEXT, step TEXT, version INTEGER, made TEXT, embedia TEXT, '
-              'PRIMARY KEY (clip, step))',
+              'frame TEXT, PRIMARY KEY (clip, step))',
               'CREATE TABLE IF NOT EXISTS questions (kind TEXT, name TEXT, input TEXT, made TEXT, embedia TEXT, '
               'PRIMARY KEY (kind, name))',
               'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
@@ -193,6 +197,30 @@ class Index:
                 return json.load(fh)
         return np.load(p, allow_pickle=False)
 
+    def recipe(self, clip):
+        """The frame the clip's features were measured on and how its proxy is made again: {frame: "stabilized" |
+        "as-is", tool, width, height, frames, fps, original, gyroflow}, or None before its first proxy."""
+        return self.get(clip, 'recipe')
+
+    def frame_kind(self, clip):
+        return (self.recipe(clip) or {}).get('frame')
+
+    def frames(self, clip):
+        """(frame count, fps) of the clip as measured, from its recipe (its proxy may be gone), or None."""
+        r = self.recipe(clip)
+        if r:
+            return int(r['frames']), float(r['fps'])
+        if os.path.exists(self.render(clip)):
+            import av
+            with av.open(self.render(clip)) as c:
+                st = c.streams.video[0]
+                return st.frames, float(st.average_rate)
+        return None
+
+    def measured(self):
+        """(original, proxy path) of the clips measured: a recipe or a proxy. The proxy file need not be there."""
+        return [(s, self.render(s)) for s in self.originals() if self.has(s, 'recipe') or os.path.exists(self.render(s))]
+
     def features(self, clip):
         """The feature names a clip has files for."""
         b = os.path.basename(self.base(clip)) + '_'
@@ -210,9 +238,9 @@ class Index:
         con = sqlite3.connect(self.db_path, timeout=60)
         for s in PERSISTENT:
             con.execute(s)
-        for t in ('features', 'questions'):                      # an index made before the column
-            if 'embedia' not in [r[1] for r in con.execute(f'PRAGMA table_info({t})')]:
-                con.execute(f'ALTER TABLE {t} ADD COLUMN embedia TEXT')
+        for t, col in (('features', 'embedia'), ('questions', 'embedia'), ('features', 'frame')):
+            if col not in [r[1] for r in con.execute(f'PRAGMA table_info({t})')]:   # an index made before it
+                con.execute(f'ALTER TABLE {t} ADD COLUMN {col} TEXT')
         return con
 
     def stamp(self):
@@ -239,11 +267,19 @@ class Index:
         with self.db() as con:
             return dict(con.execute('SELECT clip, version FROM features WHERE step = ?', (step,)).fetchall())
 
-    def record(self, step, version, clips):
+    def made_on(self, step):
+        """{clip: frame kind} the step's features were measured on (None: recorded before frames were)."""
+        with self.db() as con:
+            return dict(con.execute('SELECT clip, frame FROM features WHERE step = ?', (step,)).fetchall())
+
+    def record(self, step, version, clips, picture=True):
+        """The step made these clips' features (picture: from the proxy, on the frame the clip's recipe says)."""
         now = datetime.datetime.now().isoformat(timespec='seconds')
         with self.db() as con:
-            con.executemany('INSERT OR REPLACE INTO features (clip, step, version, made, embedia) VALUES (?,?,?,?,?)',
-                            [(self.stem(c), step, version, now, VERSION) for c in clips])
+            con.executemany('INSERT OR REPLACE INTO features (clip, step, version, made, embedia, frame) '
+                            'VALUES (?,?,?,?,?,?)',
+                            [(self.stem(c), step, version, now, VERSION, self.frame_kind(c) if picture else None)
+                             for c in clips])
 
     def questions(self):
         """What was asked of the footage: [{kind, name, input, made}], input as given."""
@@ -267,15 +303,15 @@ class Index:
         [{clip, t0, t1, score}] (+ text, voice for speech). image: CLIP on the frames, "A -> B -> C" a route
         (places.find, its best piece only); sound: CLAP (sounds.py); caption: the captions' words (captions.py,
         its best stretch); speech: the phrases' words (speech.py)."""
-        renders = [r for r in self.renders() if os.path.exists(r)]
-        name = {r: self.stem(s) for s, r in zip(self.originals(), self.renders())}
+        pairs = self.measured()                                 # the features, not the proxies
+        renders = [r for _, r in pairs]
+        name = {r: self.stem(s) for s, r in pairs}
         if by == 'image':
             from embedia import paths, places
             hit = places.find(renders, text, clip_cache or os.path.join(paths.MODELS, 'clip'))
             return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(hit[3]))]
         if by == 'sound':
             from embedia import sounds
-            pairs = [(s, r) for s, r in zip(self.originals(), self.renders()) if os.path.exists(r)]
             half = sounds.PIECE_S / 2
             return [dict(clip=name[r], t0=max(t - half, 0.0), t1=t + half, score=float(p))
                     for p, r, t in sounds.moments(pairs, text, top=top)]
