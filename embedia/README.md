@@ -82,7 +82,7 @@ replaced.
 | `who` | names with screenshots or `CLIP:SECONDS:X` (`_name`: somebody else, kept apart) | `subject_<name>` per person row; `labels` |
 | `subject NAME` | the person in words: "a woman pushing a pram" | `subject_<name>`; `labels` |
 | `beauty` | beautiful views in words, and what fills the footage without being one | `beauty`: aesthetic and scenic every 0.5 s |
-| `activities` | the shoot's own activities, added to a general list | `activities`: the likeliest every 0.5 s |
+| `activities` | the shoot's own activities, added to a general list (`--only`: replacing it) | `activities`: the likeliest every 0.5 s |
 
 Searches in words are not kept: `ix.search` reads the embeddings and captions in seconds.
 

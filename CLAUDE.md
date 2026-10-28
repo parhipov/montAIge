@@ -233,7 +233,7 @@ embedia's modules run as `$PY -m embedia.<module>` (or `$PY embedia/<module>.py`
 `$PY -m embedia <command> out/<job>/index`: `status` (steps done per clip, questions asked), `schema` (the
 tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
 --by image|sound|caption|speech`, `who NAME=REF ...`, `subject NAME --text ...`, `beauty --text ... --plain ...`,
-`activities --text ...` (a question kept with its input), `analyze --redo STEP`.
+`activities --text ... [--only]` (a question kept with its input), `analyze --redo STEP`.
 
 - `people.py track|subject|who|split|passes|summary`: tracks through every other frame, main characters in
   words or by example (a screenshot found in the footage), look-alike groups, close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
@@ -246,7 +246,8 @@ tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
   location, what happens in the footage (seconds per activity; the ones that fill it become `--theme`s; `--text`
   adds the job's own activities, "welding with sparks", "a crane lifting a load", which the timeline's `activity`
-  column then carries: joined with `people` in view it lists the moments of the job).
+  column then carries: joined with `people` in view it lists the moments of the job; with `--only` they replace
+  the general list, a compromise for any footage: a factory's own trades, "a crane operator", "a welder").
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
 - `python -m embedia sql out/<job>/index "SELECT ..."`: every feature in one SQLite table, a row per clip per
   0.5 s (speed, altitude, rotation, parallax, people and each main character, beauty, activity, the caption of that

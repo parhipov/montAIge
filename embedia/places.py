@@ -6,7 +6,7 @@
     python places.py route RENDER.mp4 [...] --clip-cache models/clip --text "a lobby" --text "a staircase"
                     --text "a tennis court" [--not ...] [--within 20] [--sheet out.jpg]
     python places.py locations RENDER.mp4 [...] [--sheet locations.jpg]
-    python places.py activities RENDER.mp4 [...] [--text "an extra activity" ...] [--sheet activities.jpg]
+    python places.py activities RENDER.mp4 [...] [--text "an extra activity" ...] [--only] [--sheet activities.jpg]
 
 embed   Every half second, the CLIP ViT-B/32 embedding of the whole frame (cached; `search` and `route`
         compute it when missing).
@@ -23,7 +23,8 @@ locations  Which clips were shot at the same place (an archive of several trips:
         cosine to the other clip's frames, both ways); clips are joined while the average likeness of two
         groups is LOCATION_SIM or more. Prints the groups with their recording times; --sheet: a row of
         frames per group.
-activities What happens in the footage, from a general list (ACTIVITIES, plus --text): seconds and clips per
+activities What happens in the footage, from a general list (ACTIVITIES, plus --text; with --only the --text
+        list alone: a shoot's own trades, "a crane operator", "a welder", "a painter"): seconds and clips per
         activity, best first, and <render>_activities.npz per render (qc.py reports an activity filling
         many scenes). The edit's --theme comes from here: an activity that fills the footage gets one scene.
 --sheet saves frames of what was found, to confirm by eye once.
@@ -49,8 +50,16 @@ ARRIVE_S = 3.0                # a route ends this far into its last place
 # clips of one place: views found in each other (see locations). Village + tennis hall + Koprino (28 clips):
 # pairs of one place 0.847..0.96 (median 0.92), of different places 0.80 at most (median 0.64)
 LOCATION_SIM = 0.83
-# activities: general, so the next shoot is covered too; phrasings checked on the village footage ("a man
-# working on a roof" caught the shed roof from every angle, "on a ladder repairing the roof" missed it from above)
+# activities: the default, a compromise; a shoot with its own trades replaces it (activities --text ... --only).
+# The first part from the footage of past jobs (village: "a man working on a roof" caught the shed roof from every
+# angle, "on a ladder repairing the roof" missed it from above); the rest a selection of Kinetics-400 (DeepMind's
+# 400 human actions), phrased the same way: what one frame shows from a distance, one phrase per sport or kind.
+# Kinetics-400 whole (175 clips of past jobs): 22 % of half seconds over ACT_HIT against 48 % for the first part
+# alone, "disc golfing" on forests seen from above, "dancing macarena" on a dance; the first part alone put
+# "a person wearing FPV goggles flying a drone" on drone shots of most jobs. This list: 33 %, ice hockey 0.98 where the
+# first part said FPV goggles 0.51; the background below takes the views from above and the empty factory hall
+# ("a person welding" 566 s -> 104 s of a factory, the hall without sparks gone). Zero-shot on one frame stays a
+# first answer: "people skydiving" on a plane seen from above, "people riding a jet ski" on a motorboat (dropped).
 ACTIVITIES = ['a man working on a roof', 'a person on a ladder', 'a person mowing the grass',
               'people sitting on a garden swing', 'people sitting at a table outdoors', 'people having a barbecue',
               'children playing', 'a child riding a bicycle', 'people walking on a path', 'people swimming',
@@ -60,10 +69,26 @@ ACTIVITIES = ['a man working on a roof', 'a person on a ladder', 'a person mowin
               'people riding a chairlift', 'people snowboarding', 'people standing in a queue',
               'people taking a selfie', 'people sitting in a cafe',
               'people sledding in the snow', 'people fishing', 'people on a boat', 'people having a picnic',
-              'a person wearing FPV goggles flying a drone', 'people waving at the camera',
-              'workers at a construction site', 'a car driving on a road']
+              'people waving at the camera', 'workers at a construction site', 'a car driving on a road',
+              # Kinetics-400, selected
+              'people playing ice hockey', 'people ice skating', 'people playing football', 'people playing basketball',
+              'people playing volleyball', 'people playing badminton', 'people playing golf', 'people bowling',
+              'people riding bicycles', 'people running', 'people rock climbing', 'people doing yoga',
+              'people exercising in a gym', 'people riding horses', 'people skateboarding', 'people riding motorcycles',
+              'people jumping on a trampoline', 'people canoeing or kayaking', 'people sailing', 'people surfing',
+              'people windsurfing', 'people jumping into the water', 'people diving underwater',
+              'people paddleboarding', 'people skiing cross-country', 'people riding snowmobiles',
+              'people making a snowman', 'people shoveling snow', 'people hiking in the mountains',
+              'people paragliding', 'people skydiving', 'people flying a kite', 'people cooking in a kitchen',
+              'people digging with a shovel', 'people picking fruit', 'a person driving a tractor', 'a person welding',
+              'people hugging', 'people shaking hands', 'people eating at a table indoors',
+              'people drinking and toasting with glasses', 'people singing', 'a person playing the guitar',
+              'people playing a board game', 'people clapping and cheering', 'people opening presents',
+              'people blowing out birthday candles', 'children on a playground', 'a person carrying a baby',
+              'people feeding animals', 'people marching in a parade', 'a person driving a car']
 NOT_ACTIVITY = GENERIC_NOT + ['an empty garden with a house', 'a village seen from above', 'trees and bushes up close',
-                              'a field and a forest', 'a building up close']
+                              'a field and a forest', 'a building up close', 'a forest seen from above',
+                              'a river seen from above', 'a road seen from above', 'the inside of a factory hall']
 ACT_HIT = 0.4                 # an activity is on screen where its probability is this or more
 
 
@@ -319,9 +344,12 @@ def locations(data, sheet=None):
     return [[rs[i] for i in g] for g in groups]
 
 
-def activities(data, mdl, extra=(), sheet=None):
-    """What happens in the footage (see the module notes); saves <render>_activities.npz."""
-    texts = list(extra) + [t for t in ACTIVITIES if t not in extra]
+def activities(data, mdl, extra=(), sheet=None, only=False):
+    """What happens in the footage (see the module notes); saves <render>_activities.npz. only: the extra texts
+    replace the general list."""
+    texts = list(extra) + ([] if only else [t for t in ACTIVITIES if t not in extra])
+    if not texts:
+        raise SystemExit('activities --only: give the activities with --text')
     temb = text_emb(mdl, texts + NOT_ACTIVITY)
     total = {t: [0.0, set(), (0.0, None, 0.0)] for t in texts}
     for r, (fr, fps, emb) in data.items():
@@ -357,6 +385,7 @@ def main():
     ap.add_argument('--not', dest='nots', action='append', default=[])
     ap.add_argument('--top', type=int, default=8)
     ap.add_argument('--within', type=float, default=20.0, help='route: seconds from one place to the next')
+    ap.add_argument('--only', action='store_true', help='activities: the --text list replaces the general one')
     ap.add_argument('--sheet', default=None)
     a = ap.parse_args()
     renders = paths.expand(a.renders)
@@ -369,7 +398,7 @@ def main():
         locations(data, a.sheet)
         return
     if a.step == 'activities':
-        activities(data, mdl, a.text, a.sheet)
+        activities(data, mdl, a.text, a.sheet, a.only)
         return
     if not a.text:
         raise SystemExit('describe the place(s) with --text')

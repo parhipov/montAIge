@@ -13,7 +13,8 @@
     python -m embedia who INDEX NAME=SCREENSHOT [NAME=CLIP:SECONDS:X ...]   (_NAME: somebody else)
     python -m embedia subject INDEX NAME --text "a woman pushing a pram" [--not ...]
     python -m embedia beauty INDEX --text "mountains" [--plain "snow up close" ...]
-    python -m embedia activities INDEX [--text "welding with sparks" ...]
+    python -m embedia activities INDEX [--text "welding with sparks" ...] [--only]   (--only: these replace the
+                                                                                      general list)
     python -m embedia questions INDEX
 
 INDEX is a folder with embedia.toml (or a job folder holding index/). A question is kept with its input and asked
@@ -108,6 +109,7 @@ def main():
     p = sub.add_parser('activities')
     p.add_argument('index')
     p.add_argument('--text', action='append', default=[])
+    p.add_argument('--only', action='store_true', help='the --text activities replace the general list')
     a = ap.parse_args()
 
     if a.cmd == 'init':
@@ -157,7 +159,9 @@ def main():
         elif a.cmd == 'beauty':
             inp, name = dict(texts=a.text, plain=a.plain), ''
         else:
-            inp, name = dict(texts=a.text), ''
+            if a.only and not a.text:
+                raise SystemExit('activities --only: give the activities with --text')
+            inp, name = (dict(texts=a.text, only=True) if a.only else dict(texts=a.text)), ''
         if er.ask(ix, a.cmd, inp, name):
             er.tidy(ix)
             er.timeline(ix)

@@ -669,10 +669,11 @@ QUESTIONS = {
                lambda ix, inp, name='': ix.renders() + [x for t in inp['texts'] for x in ('--text', t)]
                + [x for t in inp.get('plain', []) for x in ('--plain', t)]
                + ['--clip-cache', clip_cache(), '--sheet', sheet(ix, 'beauty_check.jpg')], 'beauty'),
-    # what happens in the footage, the shoot's own activities added: {texts} (places.py activities)
+    # what happens in the footage, the shoot's own activities added: {texts}, or alone with only (places.py activities)
     'activities': (lambda ix, inp, name='': ['activities'],
                    lambda ix, inp, name='': ['activities'] + ix.renders() + [x for t in inp.get('texts', [])
                                                                               for x in ('--text', t)]
+                   + (['--only'] if inp.get('only') else [])
                    + ['--clip-cache', clip_cache(), '--sheet', sheet(ix, 'activities.jpg')], 'places'),
 }
 

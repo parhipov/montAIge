@@ -532,6 +532,14 @@ speech only, CLAP tells sung from spoken, and the clips' speakers are joined int
   swing 23 s, the pilot 56 s of 14 min, as seen by eye. Wording matters: "a man working on a roof" caught the
   roof from every angle (0.42-0.97, 0.22 at most elsewhere), "a man on a ladder repairing the roof of a wooden
   shed" missed it from above. `qc.py` reports activities per scene from these.
+- **The general activity list is a compromise:** Kinetics-400 whole (400 actions, "a photo of a person ...") was
+  exact on sport (ice hockey 0.89) but named a random class where nothing happens ("disc golfing" on forests from
+  above, dance styles on a dance) and passed 0.4 on 22 % of half seconds; 33 hand-made phrases passed on 48 %, a
+  tenth of it "a person wearing FPV goggles", on drone shots of most jobs. Both together, a selection of Kinetics in the
+  same phrasing, 84 phrases: 33 %, hockey 0.98. Neither the softmax probability nor the plain cosine tells a true
+  activity from a false one (a false welding in an empty hall 0.77 / 0.24, a true paddleboard 0.48 / 0.28): false
+  ones are answered by background phrases ("the inside of a factory hall": welding 566 s -> 104 s), a shoot's own
+  trades by `--only`.
 - **The footage's own sound** (`sounds.py`, CLAP `laion/larger_clap_general`; job `sounds = true`; edit.py
   `hear:TEXT` pieces; Insta360 and GoPro listen to it too): 2 s windows every second, a sound in words against
   what else footage hears. A carried camera hears people, a drone its propellers: 66 min on the slopes were wind
