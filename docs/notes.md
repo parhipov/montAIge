@@ -65,6 +65,15 @@ renders (same frame count as the original), telemetry from the original.
   shot (an editor's piece of a whole phrase, a flying scene) held a boom uncut. One-shot scenes now go to a
   phrase without a boom inside first, a flying scene over a boom keeps its two shots, and pieces of 3 s (half a
   phrase) leave the cut on the boom.
+- **The beat a listener hears** (`beats.py`). The onset grid sits on the strongest onsets; in an oom-pah (country,
+  bluegrass, polka) those are the strummed chord between the bass notes: the sub-bass 2.8-5.7x stronger on the
+  grid's half-beats than on its beats (13 other tracks 0.2-1.5), the chords changing on its "4 and". Beat This! (a
+  trained beat and downbeat tracker, CPJKU 2024) put every beat of two such tracks 0.48 of a beat off the grid, and
+  of a steel-drum track with no such bass (its half-beats carry 0.88 of the onsets); on five others it agreed with
+  the grid, and it put the downbeat of a track with the kick on 1 and 3 alike on 3. The grid keeps its constant
+  tempo and takes the tracker's phase (its beats a quarter beat or more off, circular mean, resultant 0.6 or more)
+  and its downbeat (60 % of its downbeats on one place); a shortened track takes the whole track's beats through
+  the pieces: on a cut of six phrases the tracker heard bars of 2 and 3 after the joins, on the whole track bars of 4.
 - **Catalogue.** `https://incompetech.com/music/royalty-free/pieces.json` lists every Kevin MacLeod piece
   with BPM, feel, instruments and description; files are at `.../mp3-royaltyfree/<filename>`. Some older
   pieces return 404.

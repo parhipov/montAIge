@@ -89,6 +89,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # the repository: embedia, montaige 
 import embedia  # noqa: E402
 from embedia import paths  # noqa: E402
 from embedia import run as er  # noqa: E402
+from montaige import beats  # noqa: E402
 ROOT = paths.ROOT
 STEPS = ('scan', 'render', 'features', 'edits', 'qc')
 PROXY_W = er.PROXY_W
@@ -257,6 +258,7 @@ def preview_height(proxy):
 def edits(job, job_path, out, ix, plan_only=False):
     series = []
     brief = False                                                # the footage table once per run (edit.py --brief)
+    beats.ensure([e['music'] for e in job.get('edit', [])])      # the beats a listener hears, for edit.py's grid
     for e in job.get('edit', []):
         name = e['name']
         dst = os.path.join(out, name, name + '.mp4')

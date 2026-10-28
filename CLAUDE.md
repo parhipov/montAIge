@@ -64,13 +64,15 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   job's `camera`. The scan lists every video it left out, with why (`not taken:`); a `WARN not taken` may be
   footage (no motion data and not an ffmpeg export, or a .MOV): decide (rename, convert) and tell the owner.
 - Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo and a sure downbeat only
-  (`music_check.py`: OK, not DROP or UNSURE), the catalogue BPM as `bpm`. Once the owner has liked a track, the next ones by how they sound
+  (`music_check.py`: OK, not DROP or UNSURE), the catalogue BPM as `bpm`; `beats.py` (Beat This!, in the speech
+  venv) moves the grid onto the beat and the downbeat a listener hears (montage.py and music_check.py run it). Once the owner has liked a track, the next ones by how they sound
   (`music_like.py LIKED --not DISLIKED`), not by the catalogue's words. Kevin MacLeod, CC BY 4.0: credit when
   publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`; `whisper/` fills itself;
-`diarization/` is in the repository: pyannote's community-1, CC BY 4.0).
+`diarization/` is in the repository: pyannote's community-1, CC BY 4.0; `beats/final0.ckpt`: Beat This!, beats.py
+fetches it).
 - When the owner is there: keep steps short, say what is running, take comments in between. Left for the night
   ("do it yourself, I'll watch in the morning"), nothing waits for an answer: the task text is the whole brief,
   every choice is yours (the track, from the catalogue by the footage and by what the owner liked before; the
@@ -198,7 +200,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   job `speech`: at 1x with its own sound, never sped up); a piece longer than its phrase plays faster, up to 1.7x;
   a calm piece (no manoeuvre) over a musical hit with nothing moving on it is cut there, the clip going on after.
   `@0.5` after a piece plays it at that speed (`CLIP:SEC@0.5`: true slow motion from 50 fps; one or two per
-  edit, no more). The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
+  edit, no more). The `--start` piece takes the pickup before the first phrase when it fits there
+  (at most 1.7x: the tune comes in on a cut), the first phrase otherwise; an `--end` piece over 1.25x in a short last
   phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
   track's last hit, the music after it as the ending.
 - Craft (use them on new jobs; old jobs keep their numbers): `--build` (the phrase before a drop cut shorter and

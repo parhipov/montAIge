@@ -49,6 +49,7 @@ from scipy.signal import butter, find_peaks, sosfiltfilt, stft
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))   # the repository: embedia, montaige (run as a file)
 from montaige import music as mus  # noqa: E402
+from montaige import beats as heard_beats  # noqa: E402
 from embedia import pix  # noqa: E402
 from embedia import read  # noqa: E402
 from embedia.read import (creation_time, frame_count, load_beauty, load_flow, load_gps_speed,  # noqa: E402
@@ -926,6 +927,9 @@ def analyse_music(path, bpm_hint=None, booms=None):
     bpm0 = bpm_hint or mus.tempo(env, rate)[0]
     bpm, ph = beat_grid(env, times, bpm0)
     P = 60.0 / bpm
+    heard = heard_beats.load(path)                               # beats.py: the beat and the bar a listener hears
+    shift = heard_beats.phase_shift(times[0] + ph, P, heard[0]) if heard is not None else 0.0
+    ph = (ph + shift) % P
     beats = np.arange(times[0] + ph, y.size / sr - P * 0.5, P)
     beats = beats[beats >= 0]
     edges = np.append(beats, beats[-1] + P)
@@ -940,14 +944,18 @@ def analyse_music(path, bpm_hint=None, booms=None):
     kick = near(low, beats)
     tb = ti(np.append(beats, beats[-1] + P))
     busy = np.array([env[a:max(b, a + 1)].mean() for a, b in zip(tb[:-1], tb[1:])])
-    dphase = int(np.argmax([kick[p::4].mean() for p in range(4)]))   # downbeat: most kick
+    dphase = kicked = int(np.argmax([kick[p::4].mean() for p in range(4)]))   # downbeat: most kick
+    told = heard_beats.downbeat(beats, P, heard[1]) if heard is not None else None
+    if told is not None:                                         # unless the tracker hears it elsewhere
+        dphase = told
     mode = {True: 'only', False: 'off', None: BOOMS[0]}.get(booms, booms)
     boom = boom_hits(y, sr, beats)
     hit = boom if mode == 'only' else music_hits(env, times, beats)
     if mode == 'both':
         hit = np.maximum(hit, boom)
     return dict(path=path, duration=y.size / sr, bpm=bpm, period=P, beats=beats, loud=loud,
-                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times, hit=hit, boom=boom)
+                acc=acc, kick=kick, busy=busy, downbeat=dphase, env=env, env_t=times, hit=hit, boom=boom,
+                heard=None if heard is None else dict(shift=shift / P, kick=kicked, told=told))
 
 
 def boom_hits(y, sr, beats):
@@ -1808,6 +1816,8 @@ def place_moments(scenes, flights, musts, pools, used, rng):
             a_ = max((k for d, u, k in placed if d == day and u < t), default=-1)
             b_ = min((k for d, u, k in placed if d == day and u > t), default=len(scenes))
             free = [i for i in free if a_ < i < b_] or free
+        if first:                                                # the opening phrase, a boom inside or not: a room
+            free = free[:1]                                      # take-off past a boom went to scene 5 of 6
         best = None
 
         def trial(i, whole):
@@ -1859,14 +1869,16 @@ def place_moments(scenes, flights, musts, pools, used, rng):
             # the phrase as one shot (a piece longer than the scene's shots, or a flying scene's one shot) runs
             # over the musical hits inside it. A piece with no manoeuvre in it and nothing moving at such a hit (no
             # motion onset within hit_stats' reach: the car followed far ahead for 16 beats over a hit, "the long
-            # shot does not react to the beats") is cut on the strongest: its first part, then the clip on
+            # shot does not react to the beats") is cut on the strongest: its first part, then the clip on. A
+            # manoeuvre is never cut away: only hits after the piece's last one count
             i, x = best[1], best[2]
             n, bt = x['nbeats'], (x['t1'] - x['t0']) / x['nbeats']
             moves = f.peak_frames[f.peak_strength >= 0.5 * HIT_FULL[0]]
-            action = np.any((np.asarray(f.tricks) >= lo) & (np.asarray(f.tricks) < hi))
-            dry = [] if action else [k for k in range(HIT_MIN_BEATS, n - HIT_MIN_BEATS + 1) if x['hit'][k] > 0 and
-                                     not np.any(np.abs(moves - best[3][0] - k * bt * x['speed'] * f.fps)
-                                                <= 0.1 * x['speed'] * f.fps)]
+            at = lambda k: best[3][0] + k * bt * x['speed'] * f.fps   # the source frame on beat k of the shot
+            tricks = np.asarray(f.tricks)
+            tricks = tricks[(tricks >= lo) & (tricks < hi)]
+            dry = [k for k in range(HIT_MIN_BEATS, n - HIT_MIN_BEATS + 1) if x['hit'][k] > 0 and
+                   not np.any(tricks >= at(k)) and not np.any(np.abs(moves - at(k)) <= 0.1 * x['speed'] * f.fps)]
             if dry:
                 k = max(dry, key=lambda k: x['hit'][k])
                 sp = BASE_SPEED[int(x['cls'])]
@@ -2151,18 +2163,25 @@ def plan_edit(m, flights, a, rng, musts, avoid):
     if all(hasattr(f, 'day') for f in flights) and not MIX_DAYS[0]:
         w, cnt = chapters(scenes, flights)
         print(f'  chapters (good seconds -> scenes): {", ".join(f"{d}: {w[d]:.0f}s -> {cnt[d]}" for d in cnt)}')
-    if any(x[4] for x in musts):
+    op = next((x for x in musts if x[4]), None)
+    pick_s = sum(x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] if scenes[0]['kind'] == 'pickup' else 0.0
+    # an opening piece the pickup can hold (at most PIECE_MAX_SPEED) takes the pickup: the music comes in with the first
+    # phrase, on a cut (a view of the village held 13 s over a 4 s pickup and the first phrase met none of its beats:
+    # "the beat is heard there and the picture stays the same")
+    in_pickup = op is not None and pick_s >= PICKUP_MIN_S and \
+        (op[2] - op[1]) / flights[op[0]].fps <= PIECE_MAX_SPEED * pick_s
+    if op is not None and not in_pickup:
         # the editor's opening piece takes the first phrase: a flying scene or a hero planned there gives way (with
         # --sections a track's chorus can open it: the first phrase was a flying scene, the pickup stayed a 1 s
         # scene of another clip and the piece came second, "an off-topic piece for a couple of seconds")
         first = scenes[1] if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else scenes[0]
         first['hero'] = first['slow_hero'] = first['fly'] = False
-    short_pickup = scenes[0]['kind'] == 'pickup' and sum(
-        x['nbeats'] for x in scenes[0]['shots']) * 60.0 / m['bpm'] < PICKUP_MIN_S
-    if (any(x[4] for x in musts) or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
+    short_pickup = scenes[0]['kind'] == 'pickup' and pick_s < PICKUP_MIN_S
+    if (op is not None and not in_pickup or short_pickup) and len(scenes) > 1 and scenes[0]['kind'] == 'pickup' and \
             not (scenes[1]['hero'] or scenes[1]['fly']):
-        # the opening piece opens the edit: the pickup before the first phrase joins that phrase's first shot
-        # (it took the opening shot otherwise, and the piece came second); so does a pickup too short to be a shot
+        # an opening piece longer than that opens the edit: the pickup before the first phrase joins that phrase's
+        # first shot (it took the opening shot otherwise, and the piece came second); so does a pickup too short to be
+        # a shot
         p, s1 = scenes[0]['shots'][0], scenes[1]['shots']
         s1[0] = dict(merged([p, s1[0]]), cls=s1[0]['cls'], speed=s1[0]['speed'], q_music=s1[0]['q_music'])
         scenes = scenes[1:]
@@ -3173,6 +3192,7 @@ def main():
         music_path = base + '_music.wav'
         edit_info = music_edit.shorten(a.music, music_path, m, [(p, 16, c == 0, int(c)) for p, c in zip(phrases, cls)],
                                        a.target, F=F_whole)
+        heard_beats.save_cut(a.music, edit_info['pieces'], music_path)
         print(f'  shortened {m["duration"]:.1f}s -> {edit_info["seconds"]:.1f}s, phrases {edit_info["phrases"]}, '
               f'join cost {edit_info["jump_cost"]:.2f}')
         # the cut is whole phrases of the track from 0 on, so its phrases start where the track's do; found again
@@ -3181,8 +3201,12 @@ def main():
         phrase_t0 = float(m['beats'][phrases[0]])
         m = analyse_music(music_path, a.bpm)
         m['phrase_t0'] = phrase_t0
+    h = m['heard']
+    told = '' if h is None else ' (beats.py: the grid moved {:+.2f} beat, the downbeat {})'.format(
+        h['shift'], 'unsure' if h['told'] is None else 'as the kick' if h['told'] == h['kick']
+        else f"not the kick's {h['kick']}")
     print(f'  {os.path.basename(music_path)}: {m["duration"]:.1f}s, {m["bpm"]:.2f} BPM, {m["beats"].size} beats, '
-          f'downbeat phase {m["downbeat"]}')
+          f'downbeat phase {m["downbeat"]}{told}')
     phrases, cls = phrase_layout(m)[:2]
     sec = sec_whole if music_path == a.music else music_edit.like(
         music_edit.phrase_features(music_path, m['beats'], m['period'], phrases), F_whole, sec_whole)

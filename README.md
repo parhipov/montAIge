@@ -233,6 +233,7 @@ AGPL like the rest, and its README there gives the credits.
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
 | `music_check.py` | checks a track: constant tempo, phrases |
+| `beats.py` | beats and downbeats as a listener hears them (Beat This!), for the grid |
 | `music_like.py` | catalogue tracks that sound like one the owner liked (CLAP) |
 
 `tools/`: `lut_clips.py`, whole clips graded with a LUT on the GPU at their own size, 10-bit in and out (a delivery
