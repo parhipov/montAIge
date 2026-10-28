@@ -528,12 +528,21 @@ speech only, CLAP tells sung from spoken, and the clips' speakers are joined int
 
 ## The timeline index
 
-`timeline.py` builds `out/<job>/timeline.sqlite` from the features after every `features` step: a row per clip
+`embedia/timeline.py` builds its tables in the index's `embedia.sqlite` after every `features` step: a row per clip
 per half second (GPS speed, altitude and climb, rotation, flow, parallax, brightness, people and each main
 character's size, aesthetics and scenic views, the likeliest activity, from the job's own `_activities.npz` when
 `places.py activities` ran with the job's texts) and a row per person (track, box, name).
 The npz files stay the source; the index answers questions across them in one query ("where is she in view, with
 a view behind, at speed") instead of a one-off script loading five files onto one time grid.
+
+The index is task-agnostic: a feature is measured once per clip with nothing from the job; what needs the job's
+words or screenshots (who, a main character in words, beautiful views, the shoot's activities) is a question to the
+stored embeddings and tracks, kept with its input in `questions` and asked again for clips added later, its answer
+in the `labels` table and the `t` columns. Searches in words are not kept: they read the embeddings in seconds.
+Vehicles (objects.py): YOLO saw one car as a car and a truck at once, so a car chase had "two vehicles" in 10 %
+of its samples, every one a single car; boxes of one group overlapping by half or more count once: 3.6 %, the
+two oncoming-car stretches. Each analyzer is a `Step` in `embedia/run.py` with a version; `features` records which version made a clip's
+features, and a raised version makes them again.
 
 ## Gyroflow and stabilization
 

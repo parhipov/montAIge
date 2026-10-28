@@ -11,3 +11,5 @@ __pycache__/
 .venv*/
 # Claude Code: this machine's permission rules (tool paths)
 .claude/settings.local.json
+# dji_join.py downloads it on first use
+embedia/mp4_merge.exe

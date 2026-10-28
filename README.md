@@ -122,13 +122,20 @@ Here the heavy part runs once and is kept, and a new question is a query over it
 ```mermaid
 flowchart LR
   F["Footage"] --> R["Gyroflow<br/>stabilized proxies"]
-  R --> P["Local analysis<br/>motion, people, places"]
+  subgraph I["embedia: the index"]
+    R --> P["Local analysis<br/>motion, people, places,<br/>words, sounds, speech"]
+  end
   M["Track<br/>beats, phrases"] --> E
   P -- "numbers, summaries" --> E["Claude<br/>plan, preview, QC"]
   E --> O{"You watch<br/>the preview"}
   O -- "comment" --> E
   O -- "done" --> X["4K final"]
 ```
+
+Two parts. **embedia** (`embedia/`) turns footage into an index: a folder per shoot with the proxies, every
+feature of every clip and a SQLite database of them, asked in words or by example afterwards; it knows nothing
+of editing and can be used by any other project ([embedia/README.md](embedia/README.md)). **The montage**
+(`montaige/`) cuts edits to music from an index.
 
 Methods and measurements: [docs/notes.md](docs/notes.md). Every job so far, with the owner's comments:
 [docs/examples/](docs/examples/). How Claude works in this folder: [CLAUDE.md](CLAUDE.md).
@@ -141,8 +148,17 @@ previews and asks what to change. The steps can also be run by hand.
 ```bash
 export GYROFLOW="/path/to/Gyroflow.exe"     # Gyroflow 1.6.3
 PY=/path/to/python                            # PyTorch with CUDA
-$PY scripts/montage.py out/<job>/job.toml     # stabilize, analyse, edit, QC
-$PY scripts/montage.py out/<job>/job.toml --final <edit> --size 3840x2880
+$PY -m montaige out/<job>/job.toml     # stabilize, analyse (out/<job>/index/), edit, QC
+$PY -m montaige out/<job>/job.toml --final <edit> --size 3840x2880
+```
+
+The index alone, without the montage:
+
+```bash
+$PY -m embedia init out/trip/index --footage /path/to/footage
+$PY -m embedia run out/trip/index                                  # proxies, features, the timeline
+$PY -m embedia search out/trip/index "a jump into the water"        # --by image | sound | caption | speech
+$PY -m embedia sql out/trip/index "SELECT clip, t FROM t WHERE people > 2 AND speed > 20"
 ```
 
 A job file:
@@ -173,7 +189,7 @@ models/venvs/speech/Scripts/python -m pip install pyannote.audio transformers av
 ```
 
 Models, LUTs and music are not in the repository (but one): Claude downloads what a job needs into `models/` next to
-`scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
+`embedia/` and `montaige/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
 face matching only), the LAION aesthetic predictor for CLIP ViT-B/32 (beautiful views only), DJI's D-Log M to
 Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), Whisper large-v3-turbo (speech only),
 tracks from [incompetech.com](https://incompetech.com). pyannote's speaker-diarization-community-1 (speech only, 33 MB)
@@ -182,30 +198,44 @@ AGPL like the rest, and its README there gives the credits.
 
 ## Scripts
 
-| script | |
+`embedia/`, the index:
+
+| module | |
 |---|---|
-| `montage.py` | runs a job file step by step; finished steps are skipped |
-| `edit.py` | the edit: music analysis, shot choice, speed ramps, preview |
+| `python -m embedia` | the index from the command line: init, run, status, sql, search, who, subject, beauty, activities |
+| `index.py` | the index folder and its Python interface: clips, features, the database, questions, search in words |
+| `run.py` | the steps: scan, proxies, the analyzers (each declared with its version), the questions asked again |
+| `read.py` | camera motion, recording times, image motion, looks, GPS speed on a clip's frame grid |
+| `timeline.py` | every feature in one SQLite table, a row per half second: questions across them in one query |
 | `people.py` | poses, the pilot, close passes, tracks, a main character in words or by example (a screenshot found in the footage) |
 | `places.py` | places and activities by text, routes, locations |
 | `exports.py` | earlier exports matched to the originals |
 | `vis_motion.py` | camera motion from the picture, for clips with no gyro to read (stabilized elsewhere, a camera without one) |
 | `camera.py` | flown or carried, per clip, from a GoPro's accelerometer |
 | `gps.py` | where a GoPro clip was shot, and how fast and which way up or down, from its GPS |
-| `timeline.py` | every feature in one SQLite table, a row per half second: questions across them in one query |
 | `beauty.py` | how beautiful the view is: an aesthetic score and beautiful views in words |
 | `captions.py` | the footage in words every 3 s (Qwen3-VL, local), searched by words |
+| `sounds.py` | the clips' own sound in words (CLAP): laughter, a shout, a splash |
+| `speech.py` | what people say (Whisper) and who says it (pyannote: voices told apart across clips) |
+| `faces.py`, `smiles.py` | faces in the 4K originals; smiles at the camera |
+| `proxy.py`, `gf_render.py` | proxies: clips stabilized elsewhere scaled down; Gyroflow renders, frame for frame |
+| `dji_join.py` | joins split DJI recordings |
+
+`montaige/`, the montage:
+
+| script | |
+|---|---|
+| `montage.py` | runs a job file step by step (the index, then the edits); finished steps are skipped |
+| `edit.py` | the edit: music analysis, shot choice, speed ramps, preview |
 | `review.py` | the model's line per shot of a finished edit: what it shows, what is wrong with it |
-| `sounds.py` | the clips' own sound in words (CLAP): laughter, a shout, a splash; the sound bites of an edit |
-| `speech.py` | what people say (Whisper) and who says it (pyannote: voices told apart across clips); the phrases an edit lets you hear |
-| `proxy.py` | small proxies of clips stabilized elsewhere, frame for frame |
 | `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, a named moment put in a shot, the ending taking over, the colour of two cameras matched |
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
-| `lut_clips.py` | whole clips graded with a LUT on the GPU at their own size, 10-bit in and out: a delivery of stabilized clips without an edit |
 | `music_check.py` | checks a track: constant tempo, phrases |
 | `music_like.py` | catalogue tracks that sound like one the owner liked (CLAP) |
-| `dji_join.py` | joins split DJI recordings |
+
+`tools/`: `lut_clips.py`, whole clips graded with a LUT on the GPU at their own size, 10-bit in and out (a delivery
+of stabilized clips without an edit); `trimtest.py`, Gyroflow's trimmed renders against whole-clip ones.
 
 ## Not implemented yet
 

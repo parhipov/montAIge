@@ -1,6 +1,7 @@
 # montAIge: notes for Claude
 
-You edit footage to music with the scripts in `scripts/`. The owner of the footage says what it is and what
+You edit footage to music: `embedia/` turns the footage into an index (what is in every clip, measured once),
+`montaige/` cuts edits from it. The owner of the footage says what it is and what
 they want; you run the steps, judge from the numbers the scripts print, render previews, and change the edit
 after their comments. `docs/notes.md` explains the methods and the numbers behind them; `docs/examples/` has
 the early jobs with the owner's comments (later ones stay local, `out/<job>/example.md`).
@@ -8,12 +9,16 @@ the early jobs with the owner's comments (later ones stay local, `out/<job>/exam
 ## Layout
 
 ```
-scripts/                    the toolset
+embedia/                    the index: footage -> proxies, features, embedia.sqlite; knows nothing of editing,
+                            used by other projects too (embedia/README.md)
+montaige/                   the montage: music, edits, QC, finals, from an index (python -m montaige JOB.toml)
+tools/                      standalone utilities: lut_clips.py (whole clips graded, no edit), trimtest.py
 docs/notes.md               methods, measurements, ideas not done yet
 docs/examples/<job>.md      early jobs: footage, task, edits, comments, what it taught (new ones: out/<job>/)
 models/                     inputs that are not footage (not in git): music/, luts/, yolo/, clip/, faces/
-out/<job>/                  a job (not in git): job.toml, previews, EDLs, QC, a snapshot of scripts/
-out/diagnostics/            proxy_<job>/ (stabilized proxies and their features), .telemetry_cache/
+out/<job>/                  a job (not in git): job.toml, previews, EDLs, QC, a snapshot of embedia/ and montaige/
+out/<job>/index/            its index: embedia.toml, originals.txt, proxy/ (proxies and their features), cache/,
+                            checks/ (*_check.jpg), voices/, embedia.sqlite (the timeline, questions asked)
 LOCAL.md                    this machine: tool paths, footage folders of the jobs (not in git)
 ```
 
@@ -29,8 +34,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - Scripts perceive, you decide. Checkers write per-frame numbers to `.npz` and print a few summary lines.
   A new detector is first run on a clip with the thing and one without, and the two numbers compared, before
   any tuning or use (a sparks detector counted 200+ warm points a frame in a hall without welding: the lamps).
-  Look at pictures only on a WARN, once when a detector meets new footage (`pilot_check.jpg`,
-  `passes_check.jpg`, `subject_check.jpg`), and the shot sheet and cut sheet of each edit (`<edit>_sheet.jpg`,
+  Look at pictures only on a WARN, once when a detector meets new footage (`index/checks/`:
+  `pilot_check.jpg`, `passes_check.jpg`, `who_check.jpg`), and the shot sheet and cut sheet of each edit (`<edit>_sheet.jpg`,
   `<edit>_cuts.jpg`, made by the `qc` step) before handing previews over: one activity filling an edit from
   different angles passes every number, and a cut is judged by the music and motion around it, not by stills.
 - Editorial calls are yours: which track, how much pilot, pacing, which moments. When the owner names a
@@ -85,25 +90,33 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   describes, and it writes its findings to a file as it goes.
 - A toolkit, not a fixed pipeline: `montage.py` does what every job needs; locations, activities, exports,
   climbs and themes are called when a job asks for them. A one-off can stay a one-off script in the job.
-- The scripts are long (`edit.py` 2900 lines, 40k tokens): to change one, grep for the function and read that
-  range, never the whole file; the options are all in this file. Frames become arrays through `pix.py` (one
+- The scripts are long (`edit.py` 3300 lines, 45k tokens): to change one, grep for the function and read that
+  range, never the whole file; the options are all in this file. embedia never imports the montage; the montage
+  reads features through `embedia.read` and an index's paths. Frames become arrays through `pix.py` (one
   conversion context: a new one per frame cost more than decoding), CPU steps take `--workers`
   (`analyze.py`, `vis_motion.py`), CLIP text embeddings are cached (`models/clip/texts.npz`).
-- What a job teaches goes into `scripts/` as a general rule (a sharper definition, an option), never as a
-  special case for that footage; footage-specific things come in as inputs (texts, moments, themes).
+- What a job teaches goes into the repository as a general rule (a sharper definition, an option), never as a
+  special case for that footage: what the footage is into `embedia/` (a detector, a feature: a `Step` in
+  `embedia/run.py` with a version, raised when its output changes), how to cut it into `montaige/`;
+  footage-specific things come in as inputs (texts, moments, themes, questions to the index).
 
 ## A job
 
 ```bash
 export GYROFLOW="/path/to/Gyroflow.exe"       # Gyroflow 1.6.3 CLI, keeps the settings saved in its GUI
 PY="/path/to/python"                           # CUDA torch, ultralytics, transformers, av, cv2
-$PY scripts/music_check.py models/music/<job>/<track>.mp3 <bpm> [...]   # constant grid? sure downbeat? phrases?
-$PY scripts/montage.py out/<job>/job.toml       # scan -> render -> features -> edits -> qc
-$PY scripts/montage.py out/<job>/job.toml --only edits --only qc         # after changing the edits
-$PY scripts/montage.py out/<job>/job.toml --final <edit>[,<edit>] --size 3840x2880   # on request
+$PY montaige/music_check.py models/music/<job>/<track>.mp3 <bpm> [...]   # constant grid? sure downbeat? phrases?
+$PY -m montaige out/<job>/job.toml       # scan -> render -> features -> edits -> qc
+$PY -m montaige out/<job>/job.toml --only edits --only qc         # after changing the edits
+$PY -m montaige out/<job>/job.toml --only edits --only qc --edit 3_x  # a new version: a new [[edit]], the
+                                                                     # watched ones stay (the owner sees the history)
+$PY -m montaige out/<job>/job.toml --final <edit>[,<edit>] --size 3840x2880   # on request
 ```
 
-Every step skips what is done; edits are redone when the job file is newer than their EDL. Split DJI
+Every step skips what is done; edits are redone when the job file is newer than their EDL. montage.py writes
+`index/embedia.toml` from the job file (the keys of the footage and the analyzers: footage, camera, renders, hfov,
+people, objects, places, sounds, captions, speech) and asks the index the job's questions ([who], beauty): kept
+there with their input, asked again for clips added later. Split DJI
 recordings make the scan stop and list them. The ML steps need CUDA and stop with a message without it.
 Long renders go through a small script in `out/<job>/` (it can wait for the hour the owner names); finals
 side by side in `out/<job>/4k/`.
@@ -112,6 +125,8 @@ side by side in `out/<job>/4k/`.
 footage = ["/path/to/footage"]                    # folders (with subfolders) or clips
 camera = "carried"                                # in a hand or on a helmet, not flown (default "drone");
                                                   # "auto": per clip by its accelerometer (camera.py, GoPro)
+fpv = true                                        # FPV footage: the pilot, close passes (off unless said: you
+                                                  # decide from the footage, the code never guesses it)
 lut = "models/luts/DJI O4 Air Unit Series D-Log M to Rec.709 V1.cube"   # log footage only
 objects = true                                    # vehicles and animals (objects.py)
 sounds = true                                     # the clips' own sound (hear: pieces, --bites 2 on every edit)
@@ -141,7 +156,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   line per seed, ~10 s each), `--long` (a shot per phrase), `--no-hits` (cuts and speed not moved onto the
   musical hits); the hits are the mix's onsets and the bass booms (the sub-bass coming in after a gap: "cuts on
   the boom") together, `--booms` only the booms, `--no-booms` only the onsets.
-- People: `--people W` (0 ignores people, 4 counts them as much as piloting), `--animals W` (0 when YOLO sees
+- People: `--people W` (0 ignores people, 4 counts them as much as piloting, -2 keeps them out of a nature edit
+  but for the editor's pieces: "us only in the fly-bys"), `--animals W` (0 when YOLO sees
   animals in clutter), `--subject TAG` (`a+b+c`: any of several) with `--focus` (an edit about them;
   `--focus-min 0.03`: only where they are clearly in view), `--minor TAG` (another
   edit's main character counts like the pilot), `--peers` (look-alikes that must not stand in), `--avoid
@@ -193,7 +209,7 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   the dissolves, the bites.
 - Speech (job `speech`): `--talk N` (N phrases heard whole: spoken, 1.2-7 s, one voice, clear; only when the
   owner asks for talk: the clearest lines are seldom the interesting ones), `--duck X` (the music under speech, 0.15; 0: the music only in the gaps, an edit the voices lead). A
-  conversation worth hearing is an editorial call: read `out/<job>/transcript.txt` (cheap) and pick it as `say:`.
+  conversation worth hearing is an editorial call: read `out/<job>/index/transcript.txt` (cheap) and pick it as `say:`.
 - Seeing the footage in words: job `captions = true` runs `captions.py` (a local vision-language model, 3 s
   chunks, ~0.5 s each) in `features` and `review.py` in `qc` (the model's line per shot of an edit, WARN on
   nothing happening / blurred / dull view / the subject cut off: read the line, then `edl_edit.py --replace K`).
@@ -208,12 +224,18 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 
 ## Other tools
 
+embedia's modules run as `$PY -m embedia.<module>` (or `$PY embedia/<module>.py`), the index's own commands as
+`$PY -m embedia <command> out/<job>/index`: `status` (steps done per clip, questions asked), `schema` (the
+tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
+--by image|sound|caption|speech`, `who NAME=REF ...`, `subject NAME --text ...`, `beauty --text ... --plain ...`,
+`activities --text ...` (a question kept with its input), `analyze --redo STEP`.
+
 - `people.py track|subject|who|split|passes|summary`: tracks through every other frame, main characters in
   words or by example (a screenshot found in the footage), look-alike groups, close passes; `faces.py` tells two people in the same clothes apart by their faces in the 4K originals.
 - `sounds.py embed|search`: the clips' own sound in words (laughter, a shout of joy): a carried camera hears
   people, a drone its propellers.
 - `speech.py run|search|text` (`run` in models/venvs/speech): phrases with their words (Whisper, only where pyannote hears
-  speech), sung or spoken, and voices told apart across the job's clips (V1 talks most; `out/<job>/voices.json`,
+  speech), sung or spoken, and voices told apart across the job's clips (V1 talks most; `out/<job>/index/voices.json`,
   `voices/V1.wav` to listen, `transcript.txt`); the timeline's `voice`, `speech`, `sung` columns and `phrases`
   table. A voice is nearly a person in view; the loudest one is often whoever holds the camera.
 - `places.py search|route|locations|activities`: places in words, routes through places, clips of one
@@ -221,10 +243,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   adds the job's own activities, "welding with sparks", "a crane lifting a load", which the timeline's `activity`
   column then carries: joined with `people` in view it lists the moments of the job).
 - `exports.py FOLDER --originals ... --proxy-dir ...`: the owner's old exports, found in the originals.
-- `timeline.py out/<job> --sql "SELECT ..."`: every feature in one SQLite table, a row per clip per 0.5 s (speed,
-  altitude, rotation, parallax, people and each main character, beauty, activity, the caption of that moment) and
-  a row per person: questions across features in one query instead of a one-off script. montage.py rebuilds it
-  after `features`.
+- `python -m embedia sql out/<job>/index "SELECT ..."`: every feature in one SQLite table, a row per clip per
+  0.5 s (speed, altitude, rotation, parallax, people and each main character, beauty, activity, the caption of that
+  moment), a row per person and per main character's row (`labels`): questions across features in one query
+  instead of a one-off script. Rebuilt after every `features` step and question.
 - `captions.py RENDER [...]` / `--search "words"`: the footage in words every 3 s (Qwen3-VL 2B in `models/vlm`),
   stretches whose captions say the words; `review.py EDL`: the model's line per shot of an edit.
 - `smiles.py RENDER [...] [--sheet OUT.jpg]`: smiles at the camera, few and right (the same model asked about the
@@ -247,14 +269,15 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   RockSteady). montage.py takes it in, scales it down with `proxy.py` instead of rendering, reads its motion in
   `features`, finals cut it directly. A clip with no motion track under any other name is left out by the scan:
   give a phone or camera clip a `_stabilized` name to take it in.
-- `lut_clips.py PAIRS.json --lut FILE.cube [--wait]`: whole clips graded on the GPU at their own size, 10-bit in
-  and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `gf_render.py
+- `tools/lut_clips.py PAIRS.json --lut FILE.cube [--wait]`: whole clips graded on the GPU at their own size, 10-bit in
+  and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `embedia/gf_render.py
   --codec hevc10 --width W --height H --bitrate 120M` at the source size, given, not left to Gyroflow, then this;
   `--wait` grades each clip as Gyroflow finishes it; the clip's sound comes through).
 
 ## After a job
 
-Everything general that will be useful again goes into the repository: rules into `scripts/`, measurements and
+Everything general that will be useful again goes into the repository: rules into `embedia/` or `montaige/`,
+measurements and
 methods into `docs/notes.md`, new options into this file and the READMEs. The repository is every copy of the
 project: a line written there is read by every later job on every machine and paid for in context each time,
 so weigh a change before making it: only what a future job would act on (a rule, a threshold, a measured
@@ -262,5 +285,5 @@ number that transfers), never a job's story, how its pipeline was wired or how l
 does not go in, unless the owner says so: the job's write-up (footage, task, edits with their numbers, the
 owner's comments, what it taught) stays in `out/<job>/example.md` (not in git), and notes give the numbers
 without linking a job. Keep the job's
-`scripts/` snapshot in `out/<job>/`. Docs and code comments in English; `README.ru.md` is the Russian twin of
+`embedia/` and `montaige/` snapshot in `out/<job>/`. Docs and code comments in English; `README.ru.md` is the Russian twin of
 `README.md`.

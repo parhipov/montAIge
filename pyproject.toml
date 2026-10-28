@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# two packages: embedia (footage in, an index out: every clip measured once, asked in words afterwards; it needs
+# nothing of the other) and montaige (edits to music from an index)
+name = "montaige"
+version = "0.1.0"
+description = "embedia: an index of footage, asked in words; montaige: edits to music from it"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0" }
+dependencies = ["numpy", "scipy", "av", "opencv-python", "pillow", "matplotlib"]
+
+[project.optional-dependencies]
+ml = ["torch", "ultralytics", "transformers", "accelerate"]
+speech = ["torch", "pyannote.audio>=4", "transformers", "soundfile"]
+
+[tool.setuptools]
+packages = ["embedia", "montaige"]
+
+[tool.setuptools.package-data]
+embedia = ["README.md"]
