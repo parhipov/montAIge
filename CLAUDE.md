@@ -24,6 +24,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 
 ## How we work
 
+- Git: no commits or pushes at all, bug fixes included, until the owner says to commit; all work stays local
+  (many sessions share this repository: one job's fix must not land in all of them unseen).
 - Short edits: about a minute ("nobody watches long"). Shots of 8 beats for people, 8 to 16 for calm
   reports (`--long`: whole flights, a shot per phrase); never chop into tiny pieces (at 145 BPM even 4 beats is
   1.7 s).
