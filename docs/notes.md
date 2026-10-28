@@ -21,6 +21,10 @@ renders (same frame count as the original), telemetry from the original.
 - **Checking a track** (`music_check.py`): a studio track sits within ~10 ms of a constant grid; one sat
   68 ms off and was dropped, a live-played one wandered ±57 ms. The detector can pick a wrong multiple (73 BPM
   against 110 in the catalogue, 107 against 130): pass the catalogue BPM.
+- **An unsure downbeat.** The downbeat is the position of four with the most kick. A track with the kick on 1 and
+  3 alike (+5 % on 1 over the whole track, +3 % on 3 over its cut) got its phrases from the whole track and its
+  bars from the cut: 13 of 14 cuts of the edit fell on beat 3. `music_check.py` prints the margin; the tracks that
+  worked had +12 % to +60 %: under 10 % take another track.
 - **Shortening** (`music_edit.py`): whole phrases are cut, at most 3 jumps, only where the music sounds the
   same (phrase j like phrase i+1, judged on bar-aligned log spectra), joins on downbeats so the grid stays
   exact. Similarity alone kept 39 s of quiet intro and skipped the big part, so the path cost also rewards

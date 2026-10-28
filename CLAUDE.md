@@ -58,8 +58,8 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
   `exports.py`); flown or carried is `camera.py`'s verdict (a GoPro's accelerometer, `camera = "auto"`) or the
   job's `camera`. The scan lists every video it left out, with why (`not taken:`); a `WARN not taken` may be
   footage (no motion data and not an ffmpeg export, or a .MOV): decide (rename, convert) and tell the owner.
-- Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo only (`music_check.py`), the
-  catalogue BPM as `bpm`. Once the owner has liked a track, the next ones by how they sound
+- Music: the incompetech catalogue (`docs/notes.md`, Music), constant tempo and a sure downbeat only
+  (`music_check.py`: OK, not DROP or UNSURE), the catalogue BPM as `bpm`. Once the owner has liked a track, the next ones by how they sound
   (`music_like.py LIKED --not DISLIKED`), not by the catalogue's words. Kevin MacLeod, CC BY 4.0: credit when
   publishing.
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
@@ -96,7 +96,7 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 ```bash
 export GYROFLOW="/path/to/Gyroflow.exe"       # Gyroflow 1.6.3 CLI, keeps the settings saved in its GUI
 PY="/path/to/python"                           # CUDA torch, ultralytics, transformers, av, cv2
-$PY scripts/music_check.py models/music/<job>/<track>.mp3 <bpm> [...]   # constant grid? phrase length?
+$PY scripts/music_check.py models/music/<job>/<track>.mp3 <bpm> [...]   # constant grid? sure downbeat? phrases?
 $PY scripts/montage.py out/<job>/job.toml       # scan -> render -> features -> edits -> qc
 $PY scripts/montage.py out/<job>/job.toml --only edits --only qc         # after changing the edits
 $PY scripts/montage.py out/<job>/job.toml --final <edit>[,<edit>] --size 3840x2880   # on request
