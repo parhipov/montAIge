@@ -49,7 +49,7 @@ for clip, rr in jobs:
     if rr is None and os.path.exists(os.path.join(out_dir, stem + '_stabilized.mp4')):
         print(f'{stem}: exists, skipped', flush=True)
         continue
-    out_params = {'codec': 'H.265/HEVC' if a.codec == 'hevc10' else 'H.264/AVC', 'use_gpu': True, 'audio': False,
+    out_params = {'codec': 'H.265/HEVC' if a.codec == 'hevc10' else 'H.264/AVC', 'use_gpu': True, 'audio': True,
                   'output_width': a.width, 'output_height': a.height, 'encoder_options': opts, 'output_folder': folder}
     cmd = [a.gyroflow, clip]
     if rr:

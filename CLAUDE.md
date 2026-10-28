@@ -247,6 +247,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   RockSteady). montage.py takes it in, scales it down with `proxy.py` instead of rendering, reads its motion in
   `features`, finals cut it directly. A clip with no motion track under any other name is left out by the scan:
   give a phone or camera clip a `_stabilized` name to take it in.
+- `lut_clips.py PAIRS.json --lut FILE.cube [--wait]`: whole clips graded on the GPU at their own size, 10-bit in
+  and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `gf_render.py
+  --codec hevc10 --width W --height H --bitrate 120M` at the source size, given, not left to Gyroflow, then this;
+  `--wait` grades each clip as Gyroflow finishes it; the clip's sound comes through).
 
 ## After a job
 

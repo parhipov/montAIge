@@ -195,6 +195,7 @@ speaker-diarization-community-1 (speech only; the latter is gated on Hugging Fac
 | `edl_edit.py` | changes a finished edit without planning it again: one scene replaced, a named moment put in a shot, the ending taking over, the colour of two cameras matched |
 | `qc.py` | the OK / WARN report |
 | `final.py` | the 4K final from Gyroflow renders of the used pieces |
+| `lut_clips.py` | whole clips graded with a LUT on the GPU at their own size, 10-bit in and out: a delivery of stabilized clips without an edit |
 | `music_check.py` | checks a track: constant tempo, phrases |
 | `music_like.py` | catalogue tracks that sound like one the owner liked (CLAP) |
 | `dji_join.py` | joins split DJI recordings |
