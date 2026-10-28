@@ -143,7 +143,16 @@ renders (same frame count as the original), telemetry from the original.
   owner's exports came out 103-108 x 71-76°. Calm orbits round a boat on open water (glare, a moving subject)
   fooled it: two DJI O3 exports read pixel aspects 3.5 and 1.6 (neither square nor SuperView's 1.33, now a
   WARN), two others too little motion; with square pixels the hfov alone had a clear best at 108-112° on all
-  four, so `--hfov` alone (job `hfov`) gives the vertical one from square pixels. On the ground the picture
+  four, so `--hfov` alone (job `hfov`) gives the vertical one from square pixels. That search cost 1-3 min a
+  clip whatever its length (20-40 % of the step) and still read 97 x 92° on a GoPro looking down at its own skis
+  (they move with the camera), while the exact view matters little: it scales the rotation rates, not when the
+  camera turns or which way, and Gyroflow's zoom moves it ±15 % anyway. Now the view comes from the camera that
+  named the file, after stabilization (GoPro 100°: its exports read 87-90° in a hand, 96-114° on a drone; DJI
+  110°), square pixels; a file no camera named gets a quick estimate in the picture (square pixels, 40 pairs,
+  5° steps: 11-21 s, within 2° of the full search on clips that turn). Tracking every pair was the rest of the
+  cost: pairs of consecutive frames sampled 6 a second (every pair while turning over 60°/s) give the same 1.5 Hz
+  rates (correlation 0.997-1.000, 0.5-2.2°/s off) and trust, 3.4-5.2x faster; pairs of frames further apart lose
+  inliers to parallax (97 % one frame apart, 67 % four, 52 % eight on a flight). On the ground the picture
   stands still: mean flow under 0.12 px
   (160 px wide) for 2 s, which took nothing of a flight for the ground on the gyro clip. Low over a slope the
   ground fills the frame and its parallax reads as a tilt: on a gyro clip flown low over dry hills, pan and roll

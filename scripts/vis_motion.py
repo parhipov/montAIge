@@ -1,21 +1,22 @@
 """Camera motion from the picture, for footage that was stabilized elsewhere and has no gyro left in the file.
 
-    python vis_motion.py RENDER.mp4 [...] [--hfov DEG --vfov DEG]     ->  <render>_vis.npz next to each
+    python vis_motion.py RENDER.mp4 [...] [--hfov DEG | --calibrate] [--rate HZ]   ->  <render>_vis.npz next to each
 
 The proxy is the stabilized picture, so what it shows is the smoothed camera path: the motion edit.py looks at
-anyway (the visible, 1.5 Hz low-passed rotation). Per pair of consecutive frames: corners tracked with
-pyramidal Lucas-Kanade both ways (kept where the way back lands within FB_PX), turned into bearings through a
-pinhole, and the camera rotation fitted by RANSAC on pairs of bearings (Kabsch), refined on the inliers.
-The rotations are chained into an orientation per frame in the gyro's convention (camera x right, y down,
-z forward; world up -Z), so edit.py treats it like telemetry. There is no absolute reference in a picture, so
-the up direction is pulled towards a level camera at ELEV0 with time constant TAU_S: drift goes, a dive or a
-flip (seconds) stays.
+anyway (the visible, 1.5 Hz low-passed rotation). Per pair of frames: corners tracked with pyramidal Lucas-Kanade
+both ways (kept where the way back lands within FB_PX), turned into bearings through a pinhole, and the camera
+rotation fitted by RANSAC on pairs of bearings (Kabsch), refined on the inliers. The rotations are chained into
+an orientation per frame in the gyro's convention (camera x right, y down, z forward; world up -Z), so edit.py
+treats it like telemetry. There is no absolute reference in a picture, so the up direction is pulled towards a
+level camera at ELEV0 with time constant TAU_S: drift goes, a dive or a flip (seconds) stays.
 
-The pinhole has its own horizontal and vertical field of view: GoPro SuperView squeezes a 4:3 view into 16:9,
-and Gyroflow keeps that. Without --hfov/--vfov both are found in the picture (calibrate): a wide lens shows
-the focal length, because with a wrong one the edges of the frame move unlike its centre and no rotation
-fits; the field of view whose rotations fit the tracks best wins. Calm flying over open water fools it (a WARN
-on an aspect neither square nor SuperView's): there --hfov alone gives a picture of square pixels (DJI).
+The pairs of consecutive frames are sampled --rate a second while the camera turns under FAST_DPS, every pair
+above; the rotation is linear between.
+
+The field of view comes from the camera that named the file (CAMERAS, after stabilization), or --hfov (the job's
+`hfov`); for a file no camera named, or with --calibrate, it is estimated in the picture (calibrate). Pixels are
+square after stabilization, so the vertical view follows. A wrong view scales the rotation rates, not when the
+camera turns or which way.
 
 Saved: frame, rot (n x 3, rad, rotation vector of frame k-1 -> k, camera axes), inl (inlier share; under TRUST_INL
 the tilt is not trusted: flying low over a slope), npts,
@@ -48,16 +49,22 @@ ELEV0, TAU_S = -4.0, 5.0
 # 0.19 under 0.4, 0.32 at 0.4-0.6, 0.65-0.93 above; pan and roll stay good, 0.93 and 0.96). There the up direction
 # is pulled with TAU_LOW_S, and edit.py counts no tilt manoeuvre (dive, pull-up, descent)
 TRUST_INL, TAU_LOW_S = 0.6, 1.0
-# calibration: frame pairs whose tracks move this much (median), so that turning outweighs travel. GH010401 with
-# its gyro: 105 x 67 deg by the rates; calibrated 100 x 70 from pairs moving 3 px, 96 x 66 from 8 px, 94 x 63 from
-# 15 px (25 pairs). Gyroflow's dynamic zoom moves the focal length of that render +-15 % anyway (fov_scale 0.77-1.04)
-CAL_PAIRS, CAL_MOVE_PX = 160, 8.0
-HFOV_GRID, VFOV_GRID, CAL_FINE = np.arange(70, 136, 5.0), np.arange(40, 136, 5.0), np.arange(-4, 5, 1.0)
-# a calibrated view is believed when its pixel aspect (tan(vfov/2) / tan(hfov/2) * W / H) is square or SuperView's
-# 4:3 in 16:9 (1.33). Calm orbits over open water (glare, a moving boat; 25-28 pairs moving 8 px of 160) gave
-# 100 x 134 and 104 x 97 deg on DJI O3 exports (3.5 and 1.6); with square pixels the hfov alone had a clear best at
-# 108-112 deg on all four flights of that trip (pairs moving 4 px)
-PIXEL_ASPECTS = ((0.9, 1.1), (1.25, 1.45))
+# pairs of consecutive frames sampled a second while the camera turns under FAST_DPS, every pair above (a flip):
+# edit.py reads the 1.5 Hz low-passed rotation. Against every pair, at 6 a second: rates (1.5 Hz) correlated 0.997-
+# 1.000, off by 0.5-2.2 deg/s of 9-44, inliers and trust the same, 5.2x faster on a ski run at 50 fps and 3.4x on
+# a drone flight at 30 fps (turning over 60 deg/s 10 % of it); decoding is 4 s of it. Pairs of frames further apart
+# instead cost as much (a weak fit is tracked again 3-4 times) and lose inliers to parallax (97 % one frame apart,
+# 67 % four, 52 % eight on that flight)
+RATE_HZ, FAST_DPS = 6.0, 60.0
+# the horizontal field of view after stabilization by the name the camera gave the file (Gyroflow's export and the
+# proxy keep it): the owners' exports estimated in the picture, GoPro 87-90 deg in a hand or on a helmet (Gyroflow's
+# crop) and 96-114 on a drone, DJI O3 110; within ~15 % either way, and the rotation rates scale with it
+CAMERAS = {'GoPro': (('GX', 'GH', 'GP', 'GOPR'), 100.0), 'DJI': (('DJI',), 110.0)}
+# a file no camera named: the view estimated in the picture (square pixels), on CAL_PAIRS frame pairs whose tracks
+# move CAL_MOVE_PX (median), so that turning outweighs travel; with too little turning, HFOV. The full search (both
+# axes, 160 pairs, 1 deg steps) cost 1-3 min a clip whatever its length and read 97 x 92 on a camera looking down
+# at its own skis, 100 x 134 over calm water; GH010401 with its gyro: 105 x 67 by the rates, found 96 x 66
+CAL_PAIRS, CAL_MOVE_PX, HFOV_GRID, HFOV = 40, 8.0, np.arange(50, 131, 5.0), 100.0
 
 
 def kabsch(a, b):
@@ -168,57 +175,76 @@ def frame_count(path):
 
 
 def calibrate(path, rng):
-    """Horizontal and vertical field of view whose rotations fit the tracks of moving frame pairs best."""
+    """The horizontal field of view (square pixels) whose rotations fit the tracks of moving frame pairs best
+    -> (hfov, pairs, cost, median cost over the grid), None: too little turning."""
     n = frame_count(path)
-    pick = set(np.linspace(1, max(n - 1, 1), 6 * CAL_PAIRS).astype(int).tolist())
+    pick = set(np.linspace(1, max(n - 1, 1), 12 * CAL_PAIRS).astype(int).tolist())
     it = tracks(path, pick)
     W, H, _ = next(it)
     pairs = [(a, b) for _, a, b in it if a is not None and len(a) >= 30
              and np.median(np.linalg.norm(b - a, axis=1)) > CAL_MOVE_PX]
     pairs = [pairs[i] for i in np.linspace(0, len(pairs) - 1, min(CAL_PAIRS, len(pairs))).astype(int)] if pairs else []
-    if len(pairs) < 20:
+    if len(pairs) < CAL_PAIRS // 2:
         return None
-    def search(hs, vs):
-        cost = np.array([[np.mean([fit_rotation(a, b, Pinhole(W, H, hf, vf), rng)[2] for a, b in pairs])
-                          for vf in vs] for hf in hs])
-        i, j = np.unravel_index(np.argmin(cost), cost.shape)
-        return float(hs[i]), float(vs[j]), float(cost[i, j]), float(np.median(cost))
-    hf, vf, _, med = search(HFOV_GRID, VFOV_GRID)                # 5 deg steps, then 1 deg around the best
-    hf, vf, best, _ = search(hf + CAL_FINE, vf + CAL_FINE)
-    return hf, vf, len(pairs), best, med
+    cost = np.array([np.mean([fit_rotation(a, b, Pinhole(W, H, hf, square(hf, W, H)), rng)[2] for a, b in pairs])
+                     for hf in HFOV_GRID])
+    i = int(np.argmin(cost))
+    return float(HFOV_GRID[i]), len(pairs), float(cost[i]), float(np.median(cost))
 
 
-def square_vfov(path, hfov):
+def square(hfov, W, H):
     """The vertical field of view of a picture with square pixels and this horizontal one."""
-    with av.open(path) as c:
-        W, H = c.streams.video[0].codec_context.width, c.streams.video[0].codec_context.height
-    return float(np.degrees(2 * np.arctan(np.tan(np.radians(hfov) / 2) * H / W))), W, H
+    return float(np.degrees(2 * np.arctan(np.tan(np.radians(hfov) / 2) * H / W)))
 
 
-def pair_rotations(path, hfov, vfov):
-    """Rotation of the camera between frames k-1 and k for every frame k of a video (frame 0: none).
-    The corners start where the last rotation would take them (a flip turns the picture ~15 deg a frame, beyond
+def view(path, hfov=None, estimate=False):
+    """The horizontal field of view of a render -> (deg, where it comes from)."""
+    if hfov is not None:
+        return hfov, 'given'
+    name = os.path.basename(path).upper()
+    cam = next((c for c, (names, _) in CAMERAS.items() if name.startswith(names)), None)
+    if cam and not estimate:
+        return CAMERAS[cam][1], f"a {cam}'s after stabilization, by the file's name"
+    cal = calibrate(path, np.random.default_rng(0))
+    if cal is None:
+        return HFOV, 'too little turning to estimate it in the picture'
+    return cal[0], (f'estimated in the picture from {cal[1]} moving frame pairs (cost {cal[2]:.2f} px^2, median over '
+                    f'the grid {cal[3]:.2f})')
+
+
+def pair_rotations(path, hfov, vfov, rate=RATE_HZ):
+    """Rotation of the camera between frames k-1 and k for every frame k of a video (frame 0: none), measured on
+    `rate` pairs a second while the camera turns under FAST_DPS and on every pair above, linear between.
+    The corners start where the turning so far would take them (a flip turns the picture ~15 deg a frame, beyond
     what the tracker finds on its own: at over 200 deg/s it kept 12-60 tracks of ~270); a fast turn tracks
     against prev turned by that rotation; a weak fit is tried again with a deeper pyramid, with and without the
-    guess, and the fit with the most inliers is kept. A pair with no fit takes the last rotation (constant
+    guess, and the fit with the most inliers is kept. A pair with no fit keeps the last rate of turning (constant
     turning through a blurred frame or two)."""
     rng = np.random.default_rng(0)
     c = av.open(path)
     st = c.streams.video[0]
     st.thread_type = 'AUTO'
     fps = float(st.average_rate)
+    step = max(1, int(round(fps / rate)))
     cam = Pinhole(st.codec_context.width, st.codec_context.height, hfov, vfov)
     frames, rots, inls, npts = [], [], [], []
-    prev, R_last = None, np.eye(3)
-    for fr in c.decode(st):
-        k = int(round(float(fr.pts * st.time_base) * fps))
+    prev, ip, w, inl, npt = None, 0, np.zeros(3), 0.0, 0     # w: rotation vector a frame, of the last pair
+    for i, fr in enumerate(c.decode(st)):
+        frames.append(int(round(float(fr.pts * st.time_base) * fps)))
+        rots.append(w)
+        inls.append(inl)
+        npts.append(npt)
+        every = np.degrees(np.linalg.norm(w)) * fps > FAST_DPS
+        if not every and i - ip < step - 1:                      # neither this pair nor the next is measured
+            prev = None
+            continue
         g = pix.ndarray(fr, format='gray')
-        rv, inl, npt = np.zeros(3), 0.0, 0
-        if prev is not None:
+        if prev is not None and (every or i - ip >= step):
+            R_last = cv2.Rodrigues(w)[0]
             def guess(p, R=R_last):
                 return cam.project(cam.bearings(p) @ R.T)
             best = None
-            fast = np.linalg.norm(cv2.Rodrigues(R_last)[0]) > np.radians(FAST_DEG)
+            fast = np.linalg.norm(w) > np.radians(FAST_DEG)
             for gs, lv in ((('warp', 3),) if fast else ()) + ((guess, 3), (guess, 5), (None, 5)):
                 a, b = track_warped(prev, g, cam, R_last) if gs == 'warp' else track(prev, g, gs, lv)
                 if len(a) >= 8:
@@ -227,13 +253,14 @@ def pair_rotations(path, hfov, vfov):
                         best = (R, share, len(a))
                 if best is not None and best[1] >= 0.8 and best[2] >= 60:
                     break
+            w0, inl, npt = w, 0.0, 0
             if best is not None and best[1] * best[2] >= 8:
-                R_last, inl, npt = best
-            rv = cv2.Rodrigues(R_last)[0].ravel()
-        frames.append(k)
-        rots.append(rv)
-        inls.append(inl)
-        npts.append(npt)
+                w = cv2.Rodrigues(best[0])[0].ravel()
+                inl, npt = best[1], best[2]
+            s = i - ip
+            rots[ip + 1:] = list(w0 + np.outer(np.arange(1, s + 1) / s, w - w0))
+            inls[ip + 1:], npts[ip + 1:] = [inl] * s, [npt] * s
+            ip = i
         prev = g
     c.close()
     return np.array(frames), np.array(rots), np.array(inls), np.array(npts), fps
@@ -279,42 +306,29 @@ def integrate(rots, fps, elev0=ELEV0, tau=TAU_S, trust=None):
 
 
 def process(job):
-    """One render's motion from its picture -> (lines to print, failed?)."""
-    r, hf, vf = job
-    dst = os.path.splitext(r)[0] + '_vis.npz'
+    """One render's motion from its picture -> lines to print."""
+    r, hf, estimate, rate = job
     t0 = time.time()
-    lines = []
-    if hf is not None and vf is None:
-        vf = square_vfov(r, hf)[0]
-    if hf is None or vf is None:
-        cal = calibrate(r, np.random.default_rng(0))
-        if cal is None:
-            lines.append(f'{os.path.basename(r)}: too little motion to find the field of view; pass --hfov (square '
-                         f'pixels) or --hfov --vfov')
-            return lines, True
-        hf, vf = hf or cal[0], vf or cal[1]
-        _, W, H = square_vfov(r, hf)
-        aspect = np.tan(np.radians(vf) / 2) / np.tan(np.radians(hf) / 2) * W / H
-        lines.append(f'{os.path.basename(r)}: field of view {cal[0]:.0f} x {cal[1]:.0f} deg from {cal[2]} moving frame '
-                     f'pairs (cost {cal[3]:.2f} px^2, median over the grid {cal[4]:.2f})'
-                     + ('' if any(lo <= aspect <= hi for lo, hi in PIXEL_ASPECTS) else
-                        f'; WARN pixel aspect {aspect:.2f}, neither square nor SuperView: pass --hfov'))
-    fr, rot, inl, npt, fps = pair_rotations(r, hf, vf)
+    hf, where = view(r, hf, estimate)
+    with av.open(r) as c:
+        W, H = c.streams.video[0].codec_context.width, c.streams.video[0].codec_context.height
+    vf = square(hf, W, H)
+    fr, rot, inl, npt, fps = pair_rotations(r, hf, vf, rate)
     q = integrate(rot, fps, trust=trusted(inl, fps))
-    np.savez(dst, frame=fr, rot=rot.astype(np.float32), inl=inl.astype(np.float32), npts=npt, q=q, fps=fps,
-             hfov=hf, vfov=vf)
-    lines.append(f'{os.path.basename(r)}: {len(fr)} frames, median {np.median(npt):.0f} tracks, inliers '
-                 f'{np.median(inl[1:]) * 100:.0f} %, rotation trusted on {trusted(inl, fps).mean() * 100:.0f} %, '
-                 f'in {time.time() - t0:.0f}s')
-    return lines, False
+    np.savez(os.path.splitext(r)[0] + '_vis.npz', frame=fr, rot=rot.astype(np.float32), inl=inl.astype(np.float32),
+             npts=npt, q=q, fps=fps, hfov=hf, vfov=vf)
+    return [f'{os.path.basename(r)}: field of view {hf:.0f} x {vf:.0f} deg, {where}; {len(fr)} frames, median '
+            f'{np.median(npt):.0f} tracks, inliers {np.median(inl[1:]) * 100:.0f} %, rotation trusted on '
+            f'{trusted(inl, fps).mean() * 100:.0f} %, in {time.time() - t0:.0f}s']
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('renders', nargs='+')
-    ap.add_argument('--hfov', type=float, default=None, help='horizontal field of view of the picture, deg')
-    ap.add_argument('--vfov', type=float, default=None,
-                    help='vertical field of view (default: from --hfov with square pixels, else calibrated)')
+    ap.add_argument('--hfov', type=float, default=None,
+                    help='horizontal field of view of the picture, deg (default: by the camera that named the file)')
+    ap.add_argument('--calibrate', action='store_true', help='estimate the field of view in the picture, any file')
+    ap.add_argument('--rate', type=float, default=RATE_HZ, help='frame pairs a second while the camera turns slowly')
     ap.add_argument('--force', action='store_true')
     ap.add_argument('--integrate', action='store_true', help='only chain the saved rotations again (new pull settings)')
     ap.add_argument('--workers', type=int, default=None,
@@ -332,18 +346,11 @@ def main():
         if os.path.exists(dst) and not a.force:
             print(os.path.basename(r), 'done before')
             continue
-        todo.append((r, a.hfov, a.vfov))
-    failed = 0
+        todo.append((r, a.hfov, a.calibrate, a.rate))
     w = a.workers or max(1, min(len(todo), (os.cpu_count() or 2) // 2))
-    if w <= 1:
-        results = map(process, todo)
-    else:
-        pool = multiprocessing.Pool(w)
-        results = pool.imap_unordered(process, todo)
-    for lines, bad in results:
+    for lines in (map if w <= 1 else multiprocessing.Pool(w).imap_unordered)(process, todo):
         print('\n'.join(lines), flush=True)
-        failed += bad
-    return 1 if failed else 0
+    return 0
 
 
 if __name__ == '__main__':
