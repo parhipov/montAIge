@@ -168,6 +168,12 @@ pyannote.audio 4 (ему нужен NumPy 2), transformers, PyAV. Провере
 также с клипами без пригодных гироданных (Osmo Action 3, экспорты, стабилизированные в другом месте): движение
 камеры у них берётся по картинке.
 
+```bash
+python -m venv models/venvs/speech              # только для речи (job `speech = "ru"`); montage.py найдёт его там
+models/venvs/speech/Scripts/python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+models/venvs/speech/Scripts/python -m pip install pyannote.audio transformers av soundfile scipy
+```
+
 Модели, LUT и музыки в репозитории нет: всё, что нужно заданию, Claude скачивает в `models/` рядом со
 `scripts/`: YOLOv8s и YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo, только
 для сравнения лиц), эстетический предиктор LAION для CLIP ViT-B/32 (только для красивых видов), LUT DJI из

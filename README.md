@@ -166,6 +166,12 @@ CUDA, pyannote.audio 4 (it wants NumPy 2), transformers, PyAV. Tested on Windows
 with clips with no usable gyro (an Osmo Action 3, exports stabilized elsewhere): their camera motion comes from
 the picture.
 
+```bash
+python -m venv models/venvs/speech              # speech only (job `speech = "ru"`); montage.py finds it there
+models/venvs/speech/Scripts/python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+models/venvs/speech/Scripts/python -m pip install pyannote.audio transformers av soundfile scipy
+```
+
 Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
 `scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
 face matching only), the LAION aesthetic predictor for CLIP ViT-B/32 (beautiful views only), DJI's D-Log M to
