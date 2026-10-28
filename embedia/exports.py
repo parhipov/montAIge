@@ -27,16 +27,16 @@ MATCH = 0.5         # mean correlation for a piece to count as found
 
 
 def thumbs(path, crop_w=0.5, crop_h=0.5):
-    """(n x 192) z-scored grey 16x12 thumbnails of the frame centre at HZ, and the frame aspect."""
+    """(n x 192) z-scored grey 16x12 thumbnails of the frame centre at HZ, and the frame aspect. Sampled by the
+    frames' times: every round(fps / HZ)-th frame was 12.5 Hz at 25 fps, and every place came out 1.25x late."""
     out = []
     with av.open(path) as c:
         st = c.streams.video[0]
         st.thread_type = 'AUTO'
         fps = float(st.average_rate)
         aspect = st.codec_context.width / st.codec_context.height
-        step = max(int(round(fps / HZ)), 1)
-        for i, f in enumerate(c.decode(st)):
-            if i % step:
+        for f in c.decode(st):
+            if f.time is None or f.time < len(out) / HZ - 0.5 / fps:
                 continue
             g = pix.ndarray(f, format='gray', width=320, height=max(int(round(320 / aspect)), 12)).astype(np.float32)
             h, w = g.shape
@@ -44,7 +44,7 @@ def thumbs(path, crop_w=0.5, crop_h=0.5):
             h, w = g.shape
             out.append(g[:h - h % 12, :w - w % 16].reshape(12, h // 12, 16, w // 16).mean(axis=(1, 3)).ravel())
     t = np.array(out)
-    return t, aspect, fps / step
+    return t, aspect, HZ
 
 
 def z(x):
