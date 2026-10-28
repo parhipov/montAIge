@@ -280,7 +280,12 @@ which owners call beautiful: those come in as editor's pieces.
   mixed (30 fps into 50 fps repeats frames rather than ghost every one).
 - **Editor's pieces** (`--must/--start/--end`) are placed before anything else: a hero once took the footage
   next to a piece and the piece silently became another shot. A piece longer than its shots gets the whole
-  phrase; longer than the phrase, it plays faster, up to 1.7x (a 25 s climb in a 15 s phrase). `--start`
+  phrase; longer than the phrase, it plays faster, up to 1.7x (a 25 s climb in a 15 s phrase). A piece with no
+  manoeuvre in it whose one shot runs over a musical hit with no motion onset within 0.1 s of it is cut on the
+  strongest such hit: its first part, then the same clip 1-12 s on. A car followed far ahead for 16 beats over a
+  hit "did not react to the beats" (the owner, twice: cut by hand on the downbeat it was "круто"); the rule cut
+  both test edits there, hits met by a cut 8 -> 9 each. `--skip` holds around a piece (its 3 s opening once let
+  a swaying stretch back in); a piece inside a skip still wins. `--start`
   folds the pickup before the first phrase into the opening shot, and takes the first phrase even when a
   flying scene or a hero was planned there (with `--sections` a chorus opened one track: the pickup stayed a 1 s
   scene of another clip, "an off-topic piece for a couple of seconds at the very start"). An `--end` moment
@@ -342,10 +347,20 @@ which owners call beautiful: those come in as editor's pieces.
 - **Build and release** (`--build`): editors build tension with shorter shots and let it go with a long one. The
   phrase before a drop (the next phrase two energy classes up) is cut 8, 4, 2, 2 beats while a shot stays 1.2 s
   (8, 4, 4 at 120 BPM and above), and the drop opens with a shot of 8 beats or more. Not under `--long`.
-- **Shot sizes** (`--sizes W`): in a people edit three close-ups in a row read as one long one. A window's size
-  class is the biggest person's share of the frame (medium from 1 %, close from 6 %); two shots in a row of the
-  same class, medium or close, pay W inside a scene and across its cuts; at W 2 an edit of 18 shots kept 4 such
-  cuts of 17 (the edit prints the count always).
+- **Shot sizes** (`--sizes W`): editing by shot size: two shots of one size in a row read as a jump ("a wide on a
+  wide on a wide", an editor on an FPV forest edit). A frame's size runs 0 extreme wide, 1 wide, 2 medium, 3 close,
+  4 detail, the closest of: the view (CLIP: from high above 0, from the ground 1, up close 2.5), a person's full
+  height in frame heights (the box, or 3.4 torsos, or 4 shoulder widths when the figure is cut: 0.08 -> 0, 0.3 -> 1,
+  0.9 -> 1.5, 2 -> 2, 4 -> 3, 8 -> 4) and a vehicle's or an animal's box area (0.3 % -> 0, 2 % -> 1, 10 % -> 2,
+  30 % -> 3). CLIP's words for sizes ("a medium shot", "a close-up") ordered nothing (a person among trees read as
+  the widest), parallax neither (Spearman 0.05-0.28 against them on five jobs). A cut pays W x (1 - the step
+  between the second before it and the second after it), inside a scene and across its cuts; `--seeds` adds 0.1 x
+  the share of cuts that step. The first version counted people only and called the rest "nobody": an FPV edit of
+  13 shots, 11 of them nobody, printed 0 cuts of one size. On that job (most footage 1-2 m over snow, size 2): one
+  size across 6 of 12 and 7 of 8 cuts without it; W 2 with 8 seeds 3 of 12 and 2 of 8, the piloting median
+  0.88 -> 0.84 and 0.86 -> 0.78; W 3-4 lost the closing shot (`--roles 3`). edit.py prints the sizes always.
+  Views from above are few in low flying: two side by side pay, so the rule keeps one, and a liked one goes back
+  as a `--must`; two pieces of one length fall into the track's long phrases, side by side when those are.
 - **Opening and closing shots** (`--roles W`): "an off-topic piece for a couple of seconds at the very start", "the
   ending flew past them". The first shot earns W x how wide its view is (the REVEAL_WIDE texts against the
   close ones on the frame embeddings), the last shot W x the best of people waving, the biggest person receding,

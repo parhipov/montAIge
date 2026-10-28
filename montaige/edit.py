@@ -182,10 +182,22 @@ W_ORDER = 0.0
 # (8, 4, 2, 2 beats, none shorter than BUILD_MIN_S), and the drop itself opens with a shot of 8 beats or more (the
 # release): editors build tension with shorter shots and let it go with a long one
 BUILD, BUILD_MIN_S = [False], 1.2
-# --sizes W: shot sizes in a people edit alternate: two shots in a row of the same size class (medium: the biggest
-# person covers SIZE_MEDIUM..SIZE_CLOSE of the frame; close: SIZE_CLOSE and up) pay W, inside a scene and across
-# its cuts; three close-ups in a row read as one long one
-W_SIZE, SIZE_MEDIUM, SIZE_CLOSE = 0.0, 0.01, 0.06
+# --sizes W: shot sizes alternate (editing by shot size: two shots of one size in a row read as a jump, "a wide on a
+# wide on a wide"). A frame's size runs 0 extreme wide, 1 wide, 2 medium, 3 close, 4 detail: the closest of the view
+# (CLIP: from high above 0, from the ground 1, up close 2.5), a person's full height in frame heights (the box, or
+# from the torso when the figure is cut: SIZE_PERSON_H -> SIZE_PERSON) and a vehicle's or an animal's box area
+# (SIZE_THING_A -> SIZE_THING). A cut pays W x (1 - the step between the SIZE_EDGE_S before it and after it), nothing
+# from a step of one size, inside a scene and across its cuts. CLIP's words for shot sizes ("a medium shot", "a
+# close-up") ordered nothing: a person in a forest read as the widest, a figure far away as close
+W_SIZE, SIZE_EDGE_S = 0.0, 1.0
+SIZE_HIGH = ['an aerial view from high above', 'a drone view from high in the sky', 'a wide landscape seen from above']
+SIZE_GROUND = ['a view from the ground', 'a road seen from the ground', 'trees seen from the ground', 'a room indoors',
+               'a street seen from the ground']
+SIZE_NEAR = ['branches up close', 'a wall up close', 'snow up close', 'the ground up close', 'a machine up close',
+             'hands up close']
+SIZE_VIEW = (0.0, 1.0, 2.5)
+SIZE_PERSON_H, SIZE_PERSON = (0.08, 0.3, 0.9, 2.0, 4.0, 8.0), (0.0, 1.0, 1.5, 2.0, 3.0, 4.0)
+SIZE_THING_A, SIZE_THING = (0.003, 0.02, 0.1, 0.3, 0.6), (0.0, 1.0, 2.0, 3.0, 3.5)
 # --roles W: the first shot establishes (a wide view far away, REVEAL_WIDE against REVEAL_CLOSE, W x its mean) and
 # the last shot closes (people waving or receding, a wide view, the landing: W x the best of them over its last
 # ROLE_END_S): "the ending flew past them", "an off-topic piece at the very start"
@@ -446,10 +458,9 @@ def load_pilot_alone(stab, proxy_dir, n):
 
 
 def load_people_extras(base, n):
-    """Per frame, from people.py's rows other than the pilot: the biggest person's share of the frame (area), anyone
-    waving (wave, 0/1), and the biggest person receding (recede, 1 within 0.5 s of objects.people_motion's event);
-    zeros without people.py output. For --sizes and --roles."""
-    out = dict(area=np.zeros(n), wave=np.zeros(n), recede=np.zeros(n))
+    """Per frame, from people.py's rows other than the pilot: anyone waving (wave, 0/1) and the biggest person
+    receding (recede, 1 within 0.5 s of objects.people_motion's event); zeros without people.py output. For --roles."""
+    out = dict(wave=np.zeros(n), recede=np.zeros(n))
     if not os.path.exists(base + '_people.npz'):
         return out
     from embedia import objects
@@ -463,18 +474,12 @@ def load_people_extras(base, n):
     np.maximum.at(a_s, k[other], area[other])
     np.maximum.at(w_s, k[other], z['wave'][other])
     np.add.at(n_s, k[other], 1)
-    out['area'] = np.interp(np.arange(n), samples, a_s)
     out['wave'] = np.interp(np.arange(n), samples, w_s)
     half = int(0.5 * fps)
     for f0, kind, _ in objects.people_motion(dict(frame=samples, fps=fps, person_n=n_s, person_area=a_s)):
         if kind == 'recede':
             out['recede'][max(f0 - half, 0):f0 + half + 1] = 1.0
     return out
-
-
-def size_class(area):
-    """0 nobody or far, 1 medium, 2 close, from the biggest person's share of the frame (SIZE_MEDIUM, SIZE_CLOSE)."""
-    return (area >= SIZE_MEDIUM).astype(int) + (area >= SIZE_CLOSE).astype(int)
 
 
 def load_people(stab, proxy_dir, n):
@@ -796,7 +801,7 @@ def find_flights_list(originals, cache_dir, proxy_dir):
         fl.can = csum(load_animals(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n) > 0)
         fl.beauty = load_beauty(render, n)
         ex = load_people_extras(os.path.join(proxy_dir, os.path.splitext(os.path.basename(render))[0]), n)
-        fl.carea, fl.wave, fl.recede = csum(ex['area']), ex['wave'], ex['recede']
+        fl.wave, fl.recede = ex['wave'], ex['recede']
         fl.csw = csum((np.linalg.norm(fl.rates, axis=1) > SWING_DPS).astype(float) if carried_of(fl) else np.zeros(n))
         fl.gps_speed = load_gps_speed(render, n, fps, off)
         fl.offset, fl.when = off, creation_time(src)
@@ -1592,29 +1597,43 @@ def order_penalty(rank, k, K):
     return W_ORDER * np.clip(np.abs(rank - (k + 0.5) / K) * K - 0.5, 0, None)
 
 
-def window_size(f, n):
-    """Size class (size_class) of every window of n frames of flight f, by its start frame (0 past the end)."""
-    out = np.zeros(f.n, int)
-    if n < f.n and hasattr(f, 'carea'):
-        s = np.arange(f.n - n)
-        out[s] = size_class((f.carea[s + n] - f.carea[s]) / n)
-    return out
+def size_head(f, s):
+    """The shot size (set_sizes) over the SIZE_EDGE_S from frame s on: a shot starting there opens with it."""
+    k = max(int(SIZE_EDGE_S * f.fps), 1)
+    a = np.clip(s, 0, f.n - 1)
+    b = np.minimum(a + k, f.n)
+    return (f.csize[b] - f.csize[a]) / (b - a)
 
 
-def shot_size(x, f):
-    """Size class of a placed shot."""
-    return int(window_size(f, x['src_frames'])[min(x['src_frame'], f.n - 1)]) if 'src_frame' in x else None
+def size_tail(f, e):
+    """The shot size over the SIZE_EDGE_S before frame e: a shot ending there (e exclusive) closes with it."""
+    k = max(int(SIZE_EDGE_S * f.fps), 1)
+    b = np.clip(e, 1, f.n)
+    a = np.maximum(b - k, 0)
+    return (f.csize[b] - f.csize[a]) / (b - a)
+
+
+def same_size(a, b):
+    """1 for one size on both sides of a cut, 0 from a step of one size."""
+    return np.clip(1.0 - np.abs(a - b), 0.0, 1.0)
+
+
+def shot_edge(x, f, end):
+    """The size a placed shot closes with (end) or opens with, None without sizes."""
+    if 'src_frame' not in x or not hasattr(f, 'csize'):
+        return None
+    return float(size_tail(f, x['src_frame'] + x['src_frames']) if end else size_head(f, x['src_frame']))
 
 
 def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), theme=None, joins=(None, None),
              order=None, sizes=(None, None), roles=(False, False)):
     """Best start frames of all shots of a scene inside flight f, shots in forward order; joins: the neighbour
     scenes' sides of its cuts (cut_side), for W_JOIN; order: a per-frame penalty on the first shot (order_penalty);
-    sizes: the size classes of the neighbour scenes' shots at its cuts (W_SIZE); roles: (the opening scene, the
-    last scene) for W_ROLE."""
+    sizes: the shot sizes of the neighbour scenes at its cuts (W_SIZE); roles: (the opening scene, the last scene)
+    for W_ROLE."""
     shots = scene['shots']
     ns = [source_frames(x, f) for x in shots]
-    scls = [window_size(f, n) if W_SIZE else None for n in ns]
+    by_size = W_SIZE and hasattr(f, 'csize')
     mu = scene.get('must')                                       # (flight, first frame, last frame, end at or None)
     slow = [bool(x.get('fixed_speed')) for x in shots]           # a piece at its own speed sits in that shot
     nodes = [shot_nodes(x, f, n, pools, used, scene['hero'] and k == 0, scene['slow_hero'], rng, look,
@@ -1627,10 +1646,12 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
     idx = np.arange(N)
     if order is not None:                                        # --order: recorded out of turn within its day
         nodes[0] = nodes[0] - order
-    if W_SIZE and sizes[0] is not None and sizes[0] >= 1:        # --sizes: the same size as the shot before the cut
-        nodes[0] = nodes[0] - W_SIZE * (scls[0] == sizes[0])
-    if W_SIZE and sizes[1] is not None and sizes[1] >= 1:
-        nodes[-1] = nodes[-1] - W_SIZE * (scls[-1] == sizes[1])
+    if by_size:                                                  # --sizes: the same size on both sides of a cut
+        head, tail = size_head(f, idx), size_tail(f, np.arange(N + 1))
+        if sizes[0] is not None:
+            nodes[0] = nodes[0] - W_SIZE * same_size(sizes[0], head)
+        if sizes[1] is not None:
+            nodes[-1] = nodes[-1] - W_SIZE * same_size(tail[np.minimum(idx + ns[-1], N)], sizes[1])
     if W_ROLE and roles[0] and hasattr(f, 'cwide'):              # --roles: the opening establishes
         nodes[0] = nodes[0] + W_ROLE * np.append((f.cwide[ns[0]:] - f.cwide[:-ns[0]]) / ns[0], np.zeros(ns[0]))[:N]
     if W_ROLE and roles[1] and hasattr(f, 'cclose'):             # ... and the last shot closes (its last ROLE_END_S)
@@ -1654,8 +1675,8 @@ def scene_dp(scene, f, pools, used, rng, look=None, moves=(), hero_used=(), them
             val = np.full(N, -np.inf)
             e = idx[okp] - g                                     # its end frame
             val[okp] = dp[ps[okp]] + W_CONT * continuity(psp * f.w_back[e], sp * f.w_fwd[idx[okp]])
-            if W_SIZE:                                           # the same size class as the shot before
-                val[okp] -= W_SIZE * ((scls[k - 1][ps[okp]] == scls[k][idx[okp]]) & (scls[k][idx[okp]] >= 1))
+            if by_size:                                          # the same size as the shot before
+                val[okp] -= W_SIZE * same_size(tail[ps[okp] + pn], head[idx[okp]])
             bt = val > best
             best[bt] = val[bt]
             arg[bt] = g
@@ -1834,6 +1855,32 @@ def place_moments(scenes, flights, musts, pools, used, rng):
             print(f'  {what}: no scene can show it' +
                   (f' (longer than a phrase at {PIECE_MAX_SPEED}x)' if hi - lo > 8 * f.fps else ''))
             continue
+        if best[2] is not None and not (fixed or talk or last) and scenes[best[1]]['kind'] != 'pickup':
+            # the phrase as one shot (a piece longer than the scene's shots, or a flying scene's one shot) runs
+            # over the musical hits inside it. A piece with no manoeuvre in it and nothing moving at such a hit (no
+            # motion onset within hit_stats' reach: the car followed far ahead for 16 beats over a hit, "the long
+            # shot does not react to the beats") is cut on the strongest: its first part, then the clip on
+            i, x = best[1], best[2]
+            n, bt = x['nbeats'], (x['t1'] - x['t0']) / x['nbeats']
+            moves = f.peak_frames[f.peak_strength >= 0.5 * HIT_FULL[0]]
+            action = np.any((np.asarray(f.tricks) >= lo) & (np.asarray(f.tricks) < hi))
+            dry = [] if action else [k for k in range(HIT_MIN_BEATS, n - HIT_MIN_BEATS + 1) if x['hit'][k] > 0 and
+                                     not np.any(np.abs(moves - best[3][0] - k * bt * x['speed'] * f.fps)
+                                                <= 0.1 * x['speed'] * f.fps)]
+            if dry:
+                k = max(dry, key=lambda k: x['hit'][k])
+                sp = BASE_SPEED[int(x['cls'])]
+                two = [dict(x, nbeats=k, t1=x['t0'] + k * bt, speed=sp, beat_w=x['beat_w'][:k], hit=x['hit'][:k]),
+                       dict(x, b0=x['b0'] + k, nbeats=n - k, t0=x['t0'] + k * bt, speed=sp, beat_w=x['beat_w'][k:],
+                            hit=x['hit'][k:])]
+                head = min(hi, lo + source_frames(two[0], f) - int(PIECE_AIR_S * f.fps))
+                sc = dict(scenes[i], shots=two, must=(fi, lo, head, None))
+                r = scene_dp(sc, f, pools, rec_used(f, used, flights), rng) if head > lo else None
+                if r is not None and shows(r, lo, head, None, f.fps):
+                    print(f'  {what}: as one shot it runs over the hit at {two[1]["t0"]:.1f}s with nothing moving '
+                          f'in it there: cut on the hit, the piece\'s first {(head - lo) / f.fps:.1f}s')
+                    scenes[i]['shots'] = two
+                    best, hi = (r[0], i, None, r[1], r[2]), head
         if best[2] is not None:
             scenes[best[1]]['shots'] = [best[2]]
         if fixed:                                                # the shot that holds the piece plays at that speed
@@ -1896,7 +1943,7 @@ def assign(scenes, flights, m, rng, musts=(), avoid=None):
         k_day, K_day = same_day.index(i), len(same_day)
         sizes = (None, None)
         if W_SIZE:                                               # the neighbour scenes' shots at the cuts, if placed
-            sizes = tuple(shot_size(scenes[j]['shots'][-1 if j < i else 0], flights[scenes[j]['flight']])
+            sizes = tuple(shot_edge(scenes[j]['shots'][-1 if j < i else 0], flights[scenes[j]['flight']], j < i)
                           if 0 <= j < len(scenes) and scenes[j].get('flight') is not None else None
                           for j in (i - 1, i + 1))
         roles = (i == (1 if scenes[0]['kind'] == 'pickup' and len(scenes) > 1 else 0), i == len(scenes) - 1)
@@ -2171,7 +2218,21 @@ def edit_score(scenes, flights, m):
               for i in range(len(scenes) - 1)]
         score += 0.1 * (float(np.mean(jn)) if jn else 0.0)
         parts['joins'] = f'{np.mean(jn) if jn else 0:.2f}'
+    steps = size_steps(shots, flights)
+    if W_SIZE and steps:
+        moved = sum(s >= 0.5 for s in steps)
+        score += 0.1 * moved / len(steps)
+        parts['size steps'] = f'{moved}/{len(steps)}'
     return float(score), parts
+
+
+def size_steps(shots, flights):
+    """The step in shot size at every cut between the shots (what the second before and the second after show),
+    None without sizes."""
+    edges = [(shot_edge(x, flights[x['flight']], False), shot_edge(x, flights[x['flight']], True)) for x in shots]
+    if any(h is None for h, _ in edges):
+        return None
+    return [abs(q[0] - p[1]) for p, q in zip(edges, edges[1:])]
 
 
 def sync_stats(scenes, flights, m):
@@ -2829,8 +2890,9 @@ def make_parser():
                     help='a build before a drop: shots halving (8, 4, 2, 2 beats, none under BUILD_MIN_S) in the '
                          'phrase before one two energy classes up, and a shot of 8 beats or more on the drop')
     ap.add_argument('--sizes', type=float, default=0.0,
-                    help='weight of shot-size variety in a people edit (W_SIZE), e.g. 2: two shots in a row of the '
-                         'same size class (medium, close) pay it; default off')
+                    help='weight of editing by shot size (W_SIZE), e.g. 2: a cut between shots of one size (extreme '
+                         'wide, wide, medium, close, detail: the view, a person, a vehicle) pays it, a step of one '
+                         'size nothing; default off')
     ap.add_argument('--roles', type=float, default=0.0,
                     help='weight of an establishing first shot (a wide view) and a closing last shot (people waving '
                          'or receding, a wide view, the landing) (W_ROLE), e.g. 3; default off')
@@ -2993,6 +3055,7 @@ def prepare_flights(flights, a):
         set_sessions(flights, a.sessions)
     if W_ROLE:
         set_roles(flights, a.clip_cache)
+    set_sizes(flights, a.clip_cache, a.proxy_dir)
     st = np.concatenate([f.peak_strength for f in flights])
     HIT_FULL[0] = float(np.median(st)) if st.size else 1.0
 
@@ -3017,6 +3080,60 @@ def set_roles(flights, cache):
         f.cwide = csum(wide)
         f.cclose = csum(np.maximum.reduce([getattr(f, 'wave', np.zeros(f.n)), getattr(f, 'recede', np.zeros(f.n)),
                                            wide, land]))
+
+
+def person_size(kp, box, aspect):
+    """The shot size a person sets (SIZE_PERSON): kp 17 x (x/W, y/H, conf), box (cx, cy, w, h) of the frame. Their
+    full height in frame heights is the box's, or more when the figure is cut: 3.4 torsos (shoulders' middle to
+    hips' middle), else 4 shoulder widths."""
+    ok = kp[:, 2] > 0.5
+    pt = kp[:, :2] * [aspect, 1.0]
+    full = box[3]
+    if ok[[5, 6, 11, 12]].all():
+        full = max(full, 3.4 * np.linalg.norm(pt[[5, 6]].mean(0) - pt[[11, 12]].mean(0)))
+    elif ok[[5, 6]].all():
+        full = max(full, 4.0 * np.linalg.norm(pt[5] - pt[6]))
+    return float(np.interp(np.log2(max(full, 1e-3)), np.log2(SIZE_PERSON_H), SIZE_PERSON))
+
+
+def set_sizes(flights, cache, proxy_dir):
+    """Per frame, the shot size (W_SIZE: the closest of the view, a person, a vehicle or an animal) as a cumulative
+    sum f.csize; flights without CLIP embeddings get none."""
+    from embedia import places
+    mdl = temb = None
+    for f in flights:
+        if not os.path.exists(os.path.splitext(f.stab)[0] + '_clip.npz'):
+            continue
+        if mdl is None:
+            mdl = places.model_of(cache)
+            temb = places.text_emb(mdl, SIZE_HIGH + SIZE_GROUND + SIZE_NEAR)
+        fr, _, emb = places.embed(f.stab, mdl)
+        if len(fr) < 2:
+            continue
+        p = places.probs(emb.astype(np.float32), temb, len(temb))
+        kinds = np.repeat([0, 1, 2], [len(SIZE_HIGH), len(SIZE_GROUND), len(SIZE_NEAR)])
+        view = np.stack([p[:, kinds == k].sum(1) for k in range(3)], 1) @ np.array(SIZE_VIEW)
+        size = np.interp(np.arange(f.n), np.asarray(fr), view)
+        base = os.path.join(proxy_dir or os.path.dirname(f.stab), os.path.splitext(os.path.basename(f.stab))[0])
+        if os.path.exists(base + '_people.npz'):
+            z = np.load(base + '_people.npz')
+            with av.open(f.stab) as c:
+                st = c.streams.video[0]
+                aspect = st.width / st.height
+            kp = z['kp'].reshape(len(z['frame']), 17, 3)
+            samples = z['samples']
+            ps = np.full(len(samples), -1.0)
+            k = np.clip(np.searchsorted(samples, z['frame']), 0, len(samples) - 1)
+            for j in np.flatnonzero(z['conf'] >= 0.5):
+                ps[k[j]] = max(ps[k[j]], person_size(kp[j], z['box'][j], aspect))
+            near = np.clip(np.searchsorted(samples, np.arange(f.n)), 0, len(samples) - 1)
+            size = np.maximum(size, ps[near])
+        if os.path.exists(base + '_objects.npz'):
+            z = np.load(base + '_objects.npz')
+            a = np.interp(np.arange(f.n), z['frame'], np.maximum(z['vehicle_area'], z['animal_area']))
+            size = np.maximum(size, np.where(a > SIZE_THING_A[0], np.interp(np.log10(np.maximum(a, 1e-6)),
+                                                                           np.log10(SIZE_THING_A), SIZE_THING), -1.0))
+        f.csize = csum(size)
 
 
 def main():
@@ -3081,6 +3198,9 @@ def main():
         lo, hi = (int(round(float(v) * f.fps)) for v in sec.split('-'))
         f.usable[max(lo, 0):min(hi, f.n)] = False
         f.cu = csum(f.usable.astype(np.float64))
+        if not hasattr(f, 'skipped'):
+            f.skipped = np.zeros(f.n, bool)
+        f.skipped[max(lo, 0):min(hi, f.n)] = True
     if a.skip:
         print(f'  skipped: {len(a.skip)} pieces, {sum(float(v.split(":")[-1].split("-")[1]) - float(v.split(":")[-1].split("-")[0]) for v in a.skip):.0f} s')
     musts, heard, said = [], [], []                              # hear:TEXT and say: pieces, for their sound (bites)
@@ -3152,7 +3272,12 @@ def main():
         # the last shot runs on while the music rings out, so the ending opens more footage before the moment
         o0 = max(lo - int((END_OPEN_S if last else MUST_OPEN_S) * f.fps), 0)
         o1 = min(max(hi, end_at or 0) + int(MUST_OPEN_S * f.fps), f.n)
-        f.usable[o0:o1] = True                                   # the editor's call beats the automatic trimming
+        f.usable[o0:o1] = True                                   # the editor's call beats the automatic trimming,
+        if not hasattr(f, 'pieces'):                             # but not a --skip around a piece (a car swaying
+            f.pieces = np.zeros(f.n, bool)                       # just after it came back in)
+        f.pieces[max(lo, 0):min(hi, f.n)] = True
+        if hasattr(f, 'skipped'):
+            f.usable[f.skipped & ~f.pieces] = False
         f.cu = csum(f.usable.astype(np.float64))
         musts.append((f.idx, lo, hi, end_at, first, fixed, bool(talk)))
         if talk:
@@ -3212,11 +3337,12 @@ def main():
     back = sum(1 for (d, t), (e, u) in zip(ts, ts[1:]) if d == e and t is not None and u is not None and u < t)
     print(f'  recording order: {back} of {len(scenes) - 1} scene cuts step back in time within a day'
           + ('' if W_ORDER else ' (--order W asks for the order)'))
-    if W_PEOPLE or W_SIZE:
-        sz = [shot_size(x, flights[x['flight']]) for x in shots]
-        same = sum(1 for p, q in zip(sz, sz[1:]) if p == q and p >= 1)
-        print(f'  shot sizes: {sz.count(2)} close, {sz.count(1)} medium, {sz.count(0)} nobody; the same size twice '
-              f'in a row at {same} of {len(sz) - 1} cuts' + ('' if W_SIZE else ' (--sizes W asks for variety)'))
+    steps = size_steps(shots, flights)
+    if steps:
+        edges = [(shot_edge(x, flights[x['flight']], False), shot_edge(x, flights[x['flight']], True)) for x in shots]
+        print(f'  shot sizes (0 extreme wide .. 4 detail): {" ".join(f"{(h + t) / 2:.0f}" for h, t in edges)}; one '
+              f'size across {sum(s < 0.5 for s in steps)} of {len(steps)} cuts, mean step {np.mean(steps):.1f}'
+              + ('' if W_SIZE else ' (--sizes W asks for steps)'))
     if W_ROLE:
         x0, x1 = shots[0], shots[-1]
         f0, f1 = flights[x0['flight']], flights[x1['flight']]

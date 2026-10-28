@@ -195,13 +195,15 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 - Editor's pieces: `--must`, `--start`, `--end` as `CLIP:SEC`, `CLIP:START-END` or `find:TEXT` / `find:A ->
   B -> C`, or `hear:TEXT` (the clips' own sound, job `sounds = true`), or `cap:TEXT` (what the captions say, job
   `captions = true`: "cap:jumping into the water"), or `say:TEXT` / `say:CLIP:START-END` (a phrase of speech,
-  job `speech`: at 1x with its own sound, never sped up); a piece longer than its phrase plays faster, up to 1.7x.
+  job `speech`: at 1x with its own sound, never sped up); a piece longer than its phrase plays faster, up to 1.7x;
+  a calm piece (no manoeuvre) over a musical hit with nothing moving on it is cut there, the clip going on after.
   `@0.5` after a piece plays it at that speed (`CLIP:SEC@0.5`: true slow motion from 50 fps; one or two per
   edit, no more). The `--start` piece takes the first phrase; an `--end` piece over 1.25x in a short last
   phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
   track's last hit, the music after it as the ending.
 - Craft (use them on new jobs; old jobs keep their numbers): `--build` (the phrase before a drop cut shorter and
-  shorter, a long shot on the drop), `--sizes 2` (shot sizes alternate in a people edit), `--roles 3` (an
+  shorter, a long shot on the drop), `--sizes 2` (editing by shot size: no cut between two shots of one size, from
+  extreme wide to detail, by the view, a person or a vehicle; any edit), `--roles 3` (an
   establishing first shot, a closing last shot: waving, receding, a wide view, the landing), `--dissolve 0.8`
   (cross-dissolves into scenes on calm music; never onto a hit or into a hero), `--bites 2` (the footage's own
   sound under the music at a laugh, a shout, a splash; montage.py adds it with `sounds = true`; a `hear:` piece
