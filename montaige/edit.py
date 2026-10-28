@@ -1060,18 +1060,21 @@ def build_pattern(bpm, total=16):
     return out
 
 
+def phrase_phases(m):
+    """The bar-loudness jumps summed over each of the four bars a 4-bar phrase can start on: a phrase starts where
+    they line up best. Spread alike over the four, the track has no phrase this can find (music_check.py)."""
+    loud, d0 = m['loud'], m['downbeat']
+    nbars = (len(m['beats']) - d0) // 4
+    jumps = np.abs(np.diff([loud[d0 + 4 * b:d0 + 4 * b + 4].mean() for b in range(nbars)]))
+    return np.array([jumps[(np.arange(len(jumps)) + 1) % 4 == p].sum() for p in range(4)])
+
+
 def phrase_layout(m):
     """Phrase starts (beat index), energy class of each, pickup end, quiet threshold."""
     beats, nb, loud = m['beats'], len(m['beats']), m['loud']
     z = lambda x: (x - np.median(x)) / (x.std() + 1e-9)
     beat_energy = z(loud) + 0.5 * z(m['busy'])
-    d0 = m['downbeat']
-    nbars = (nb - d0) // 4
-    bar_loud = np.array([loud[d0 + 4 * b:d0 + 4 * b + 4].mean() for b in range(nbars)])
-    jumps = np.abs(np.diff(bar_loud))
-    # phrase = 4 bars; its start phase (in bars) is where loudness jumps line up best
-    pphase = int(np.argmax([jumps[(np.arange(len(jumps)) + 1) % 4 == p].sum() for p in range(4)]))
-    start = d0 + 4 * pphase
+    start = m['downbeat'] + 4 * int(np.argmax(phrase_phases(m)))
     if m.get('phrase_t0') is not None:                           # a shortened track keeps the whole one's phrases
         start = int(np.argmin(np.abs(beats - m['phrase_t0'])))
     phrases, b = [], start

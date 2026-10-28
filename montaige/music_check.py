@@ -9,7 +9,9 @@ position of four; a kick on 1 and 3 alike flips it between the whole track and i
 phrases and every scene cut land half a bar off: take another track), whether the grid is on the beat (the
 sub-bass on the half-beats against the beats: a bass under the half-beats means the grid sits on an oom-pah's
 chord, half a beat off; the onsets there say how even the eighths are, for reading only), what beats.py's tracker
-moved (the grid onto the beats and the downbeat a listener hears; the checks above are measured after it), and the
+moved (the grid onto the beats and the downbeat a listener hears; the checks above are measured after it), how sure
+the phrase start is (the bar-loudness jumps on it over the next best of the four bars: a loop with no phrase in its
+loudness gets scene cuts anywhere in its phrases, "hardly tied to the music": take another track), and the
 energy class of every 16-beat phrase (0 quiet .. 3 biggest), which tells what music_edit.py can keep. A phrase is the unit
 the track is shortened by, so edit lengths come in steps of 16 beats (10 s at 96 BPM).
 """
@@ -25,6 +27,9 @@ from montaige import beats as heard_beats  # noqa: E402
 from montaige import music as mus  # noqa: E402
 
 DOWNBEAT_SURE = 10   # %: a track with the kick 4 % stronger on 1 than on 3 had its cut's downbeat on 3
+PHRASE_SURE = 15     # %: the bar-loudness jumps on the chosen phrase start over the next best start. Christmas Rap 2 %
+                     # ("the scene changes are hardly tied to the music") and Up on a Housetop 3 % ("all mixed up"),
+                     # Magistar 127 % (its edit's timing liked); Deck the Halls B 24 %, Nouvelle Noel 37 %
 BASS_OFF = 2.0       # sub-bass on the half-beats over the beats: country, bluegrass and polka 2.8-5.7 (the strummed
                      # chord is the strongest onset, the bass falls between the grid's beats; the chords then change on its
                      # "4 and"); 13 others 0.2-1.5
@@ -56,11 +61,14 @@ for path, bpm in zip(sys.argv[1::2], sys.argv[2::2]):
     sure = (1 - kick[-2] / max(kick[-1], 1e-9)) * 100
     flat, bass = beat_phase(path, m)
     beat = 'DROP' if bass >= BASS_OFF else 'OK'
+    ph = np.sort(bf.phrase_phases(m))
+    psure = (ph[-1] / max(ph[-2], 1e-9) - 1) * 100
     print(f"{os.path.basename(path):26} {m['duration']:6.1f}s {m['bpm']:7.2f} BPM, phrase {16 * m['period']:4.1f}s | "
           f"strong onsets {pk.size}: median off-grid {off:.0f} ms ({'OK' if off < 20 else 'DROP'}), "
           f"on beat {np.mean(d < 40) * 100:.0f}%, on an eighth {np.mean(np.minimum(d, half) < 40) * 100:.0f}% | "
           f"downbeat +{sure:.0f}% kick ({'OK' if sure >= DOWNBEAT_SURE else 'UNSURE'}) | "
-          f"half-beats {flat:.2f} of the onsets, bass {bass:.1f}x ({beat}) | phrases {''.join(map(str, cls))}"
+          f"half-beats {flat:.2f} of the onsets, bass {bass:.1f}x ({beat}) | "
+          f"phrase start +{psure:.0f}% ({'OK' if psure >= PHRASE_SURE else 'UNSURE'}), phrases {''.join(map(str, cls))}"
           + ('' if not m['heard'] else f" | beats.py: grid {m['heard']['shift']:+.2f} beat, downbeat "
              + ('unsure' if m['heard']['told'] is None else 'as the kick' if m['heard']['told'] == m['heard']['kick']
                 else f"{m['heard']['told']}, not the kick's {m['heard']['kick']}")))

@@ -25,6 +25,11 @@ renders (same frame count as the original), telemetry from the original.
   3 alike (+5 % on 1 over the whole track, +3 % on 3 over its cut) got its phrases from the whole track and its
   bars from the cut: 13 of 14 cuts of the edit fell on beat 3. `music_check.py` prints the margin; the tracks that
   worked had +12 % to +60 %: under 10 % take another track.
+- **An unsure phrase start.** A phrase starts on the bar of four where the bar-loudness jumps line up. A rap loop
+  had them spread alike over the four bars (31.9 / 37.3 / 34.4 / 36.6, +2 % for the chosen one), a bouncy
+  sing-along +3 %: their edits' scene changes were "hardly tied to the music" and "all mixed up", with cuts on the
+  downbeats and 6 of 9 on hits. An orchestral track at +127 % cut the same footage with its timing liked.
+  `music_check.py` prints the margin; under 15 % take another track.
 - **Shortening** (`music_edit.py`): whole phrases are cut, at most 3 jumps, only where the music sounds the
   same (phrase j like phrase i+1, judged on bar-aligned log spectra), joins on downbeats so the grid stays
   exact. Similarity alone kept 39 s of quiet intro and skipped the big part, so the path cost also rewards
