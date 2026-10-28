@@ -28,6 +28,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))   # the repository: embedia, montaige (run as a file)
 from montaige import edit as bf  # noqa: E402
+from embedia.read import stabilized_before  # noqa: E402
 from embedia import pix  # noqa: E402
 MARGIN_S, DISSOLVE_S = 1.0, 0.5
 FADE_IN_S, FADE_OUT_S = 0.6, 2.0     # as in edit.py's preview, so an --end moment sits right before the fade
@@ -267,7 +268,7 @@ def main():
         json.dump(ranges, fh, ensure_ascii=False, indent=1)
     stem = lambda fi: os.path.splitext(os.path.basename(flights[fi]['original']))[0]
     def piece(fi, j):
-        if bf.stabilized_before(flights[fi]['original']):       # stabilized before: cut from the clip itself
+        if stabilized_before(flights[fi]['original']):       # stabilized before: cut from the clip itself
             return flights[fi]['original']
         # Gyroflow numbers the trims (-001, -002 ...) only when a clip has more than one
         if len(ranges[flights[fi]['original']]) == 1:
@@ -284,8 +285,8 @@ def main():
         Wp, Hp, (x0, y0) = piece_size(Wc, Hc, cb, ct, zoom)
         return Wp, Hp, (x0 + (Wc - a.width) // 2, y0 + (Hc - a.height) // 2)
     sizes = {c: size_of(c) for c in ranges}
-    for Wp, Hp in sorted({s[:2] for c, s in sizes.items() if not bf.stabilized_before(c)}):
-        todo = {c: r for c, r in ranges.items() if sizes[c][:2] == (Wp, Hp) and not bf.stabilized_before(c) and
+    for Wp, Hp in sorted({s[:2] for c, s in sizes.items() if not stabilized_before(c)}):
+        todo = {c: r for c, r in ranges.items() if sizes[c][:2] == (Wp, Hp) and not stabilized_before(c) and
                 not all(os.path.exists(piece(fi, j)) for fi in flights if flights[fi]['original'] == c for j in range(len(r)))}
         if not todo:
             continue
@@ -306,7 +307,7 @@ def main():
     for k, (fi, j, lo) in sorted(owner.items()):
         if (fi, j) in starts:
             continue
-        if bf.stabilized_before(flights[fi]['original']):       # the proxy is this file, frame for frame
+        if stabilized_before(flights[fi]['original']):       # the proxy is this file, frame for frame
             starts[(fi, j)] = 0
             continue
         asked = int(round(round(lo / flights[fi]['fps'] * 1000.0) / 1000.0 * flights[fi]['fps']))
@@ -340,7 +341,7 @@ def main():
         fi, j, _ = owner[k]
         if (fi, j) not in readers:
             Wp, Hp, crop = sizes[flights[fi]['original']]
-            if bf.stabilized_before(flights[fi]['original']):
+            if stabilized_before(flights[fi]['original']):
                 readers[(fi, j)] = Reader(piece(fi, j), W, H, crop, scale=(Wp, Hp), first=int(owner_lo[(fi, j)]))
             else:
                 readers[(fi, j)] = Reader(piece(fi, j), W, H, crop)
