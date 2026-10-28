@@ -1,7 +1,9 @@
 # jobs, proxies, caches, previews and finals
 out/
-# music, LUTs and model weights (see README: Requirements)
-models/
+# music, LUTs and model weights (see README: Requirements), except pyannote's diarization (CC BY 4.0, gated on
+# Hugging Face behind a contact form: kept here, with its README for the attribution)
+models/*
+!models/diarization/
 # this machine: tool paths and footage folders
 LOCAL.md
 __pycache__/

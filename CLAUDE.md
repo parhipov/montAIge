@@ -65,7 +65,7 @@ LOCAL.md                    this machine: tool paths, footage folders of the job
 - `models/` is filled on demand: download what a job needs into `models/<kind>/` (`yolo/yolov8s.pt`,
   `yolo/yolov8s-pose.pt` from Ultralytics; `clip/` and `clap/` fill themselves from Hugging Face; `faces/` SFace from the
   OpenCV Model Zoo; `aesthetic/sa_0_4_vit_b_32_linear.pth` from LAION-AI/aesthetic-predictor; `luts/` DJI's D-Log M to Rec.709 LUT from DJI's site, any camera's; `music/<job>/`; `whisper/` fills itself;
-`diarization/speaker-diarization-community-1` from pyannote on Hugging Face, gated: the owner accepts its conditions).
+`diarization/` is in the repository: pyannote's community-1, CC BY 4.0).
 - When the owner is there: keep steps short, say what is running, take comments in between. Left for the night
   ("do it yourself, I'll watch in the morning"), nothing waits for an answer: the task text is the whole brief,
   every choice is yours (the track, from the catalogue by the footage and by what the owner liked before; the

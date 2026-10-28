@@ -172,12 +172,13 @@ models/venvs/speech/Scripts/python -m pip install torch torchaudio --index-url h
 models/venvs/speech/Scripts/python -m pip install pyannote.audio transformers av soundfile scipy
 ```
 
-Models, LUTs and music are not in the repository: Claude downloads what a job needs into `models/` next to
+Models, LUTs and music are not in the repository (but one): Claude downloads what a job needs into `models/` next to
 `scripts/`: YOLOv8s and YOLOv8s-pose (Ultralytics), CLIP ViT-B/32 (Hugging Face), SFace (OpenCV Model Zoo,
 face matching only), the LAION aesthetic predictor for CLIP ViT-B/32 (beautiful views only), DJI's D-Log M to
-Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), Whisper large-v3-turbo and pyannote's
-speaker-diarization-community-1 (speech only; the latter is gated on Hugging Face: accept its conditions), tracks from
-[incompetech.com](https://incompetech.com).
+Rec.709 LUT (log footage only; every DJI D-Log M LUT is the same file), Whisper large-v3-turbo (speech only),
+tracks from [incompetech.com](https://incompetech.com). pyannote's speaker-diarization-community-1 (speech only, 33 MB)
+is in the repository in `models/diarization/`: on Hugging Face it stands behind a contact form; it is CC BY 4.0, not
+AGPL like the rest, and its README there gives the credits.
 
 ## Scripts
 
