@@ -208,7 +208,10 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
   job `speech`: at 1x with its own sound, never sped up); a piece longer than its phrase plays faster, up to 1.7x;
   a calm piece (no manoeuvre) over a musical hit with nothing moving on it is cut there, the clip going on after.
   `@0.5` after a piece plays it at that speed (`CLIP:SEC@0.5`: true slow motion from 50 fps; one or two per
-  edit, no more). The `--start` piece takes the pickup before the first phrase when it fits there
+  edit, no more). `--story`: the pieces in the order given (`--start`, the `--must` pieces, `--end`): a story the
+  owner tells; without it each goes where it scores best. A piece meant to fill one shot is the shot less 0.5 s at
+  most (6 s at 8 beats of 73 BPM), else it takes the whole phrase. The `--start` piece takes the pickup before the
+  first phrase when it fits there
   (at most 1.7x: the tune comes in on a cut), the first phrase otherwise; an `--end` piece over 1.25x in a short last
   phrase takes the scene before it too (not a hero). An `--end` moment (`CLIP:SEC`, e.g. a crash) lands on the
   track's last hit, the music after it as the ending.

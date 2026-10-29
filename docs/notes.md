@@ -459,6 +459,10 @@ speech only, CLAP tells sung from spoken, and the clips' speakers are joined int
   the half seconds with a voice, 96.9 % without); it needs footage where people come and go.
 - **Lines in order**: placed where each scored best, a play's lines came out shuffled; with `--order` the editor's
   pieces of a day now keep their recording order, each between the scenes of those recorded before and after it.
+- **A told story** (`--story`): the arrival opening a story was recorded after the sledding that follows it, so
+  `--order` would swap them; placed by score, six pieces came out mixed (the sledding in scene 4 of 6). With
+  `--story` each piece goes between the scenes of those told before and after it, leaving a scene for each piece
+  told between them still to come (without that the first `--must` piece took scene 4 and the rest had no room).
 - **The review model and speech**: a static wide shot of a child speaking is "nothing happening" to the stills;
   a shot under a phrase of speech is not flagged for it.
 

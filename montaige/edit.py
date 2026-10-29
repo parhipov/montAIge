@@ -185,6 +185,11 @@ NEAR_TAU_S = 20.0
 # W per slot its frame is off its own (day_rank, order_penalty). Scenes are placed by priority, so a penalty
 # against the scenes already placed anchored everything on the first one: 4 of 9 cuts stepped back, then 3
 W_ORDER = 0.0
+# --story: the editor's pieces in the order given (--start, the --must pieces, --end), each between the scenes of
+# the pieces before and after it: a story the owner tells, not in recording order (the arrival from the last clip of
+# the day first). Without it each goes where it scores best, and a told story came out mixed up. The number of
+# --must pieces when on
+STORY = [0]
 # --build: the phrase before a drop (the next phrase two energy classes up) is cut as a build, its shots halving
 # (8, 4, 2, 2 beats, none shorter than BUILD_MIN_S), and the drop itself opens with a shot of 8 beats or more (the
 # release): editors build tension with shorter shots and let it go with a long one
@@ -1855,6 +1860,9 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         return (getattr(g, 'day', None), w.timestamp() + mu[1] / g.fps) if w is not None else (None, None)
 
     placed = []                                                  # (day, recording time, scene) of those placed
+    told, rank = [], {}                                          # --story: (rank, scene) of those placed
+    for i, mu in enumerate(musts):
+        rank[id(mu)] = -1 if mu[4] else 1e9 if mu[3] is not None else i if i < STORY[0] else None
     for mu in sorted(musts, key=lambda x: (x[3] is None, not x[4], (when_of(x)[1] or 0) if W_ORDER else 0)):
         fi, lo, hi, end_at, first = mu[:5]
         fixed = mu[5] if len(mu) > 5 else None                   # CLIP:SEC@0.5: shown at that speed
@@ -1883,6 +1891,16 @@ def place_moments(scenes, flights, musts, pools, used, rng):
             a_ = max((k for d, u, k in placed if d == day and u < t), default=-1)
             b_ = min((k for d, u, k in placed if d == day and u > t), default=len(scenes))
             free = [i for i in free if a_ < i < b_] or free
+        r_ = rank[id(mu)] if STORY[0] else None
+        if r_ is not None:                                       # --story: between the pieces told before and after,
+            a_ = max((k for q, k in told if q < r_), default=-1)  # room left for the ones told between still to come
+            b_ = min((k for q, k in told if q > r_), default=len(scenes))
+            q_b = min((q for q, k in told if q > r_), default=2e9)
+            done = {q for q, _ in told}
+            later = sum(1 for x in musts if rank[id(x)] is not None and r_ < rank[id(x)] < q_b and rank[id(x)] not in done)
+            room = [i for i in free if a_ < i < b_]
+            later = min(later, len(room) - 1)                    # more pieces than scenes: still in order
+            free = [i for i in room if sum(j > i for j in room) >= later] or room or free
         if first:                                                # the opening phrase, a boom inside or not: a room
             free = free[:1]                                      # take-off past a boom went to scene 5 of 6
         best = None
@@ -1969,6 +1987,8 @@ def place_moments(scenes, flights, musts, pools, used, rng):
             sh_[k]['speed'], sh_[k]['fixed_speed'] = (fixed if best[2] is None else sh_[k]['speed']), True
         scenes[best[1]]['must'] = (fi, lo, hi, end_at)
         placed.append((day, t, best[1]))
+        if r_ is not None:
+            told.append((r_, best[1]))
         if scenes[best[1]].get('day') and getattr(f, 'day', None):
             scenes[best[1]]['day'] = f.day                       # an opening or an ending of another day
         sp = f' at {best[2]["speed"]:.2f}x' if best[2] is not None and best[2]['speed'] > BASE_SPEED[0] + 0.01 else ''
@@ -3030,6 +3050,9 @@ def make_parser():
                     help='weight of the recording order within a day (W_ORDER), e.g. 4: a scene pays it for footage '
                          'recorded before a scene placed earlier in the edit on the same day, or after one placed '
                          'later (day, evening, sunset in that order); default off')
+    ap.add_argument('--story', action='store_true',
+                    help="the editor's pieces in the order given: --start, the --must pieces, --end (a story the "
+                         'owner tells); default each where it scores best')
     ap.add_argument('--seeds', type=int, default=0,
                     help='plan with this many seeds (--seed and the next ones, else 0, 1, ...) and keep the best '
                          'by edit_score: piloting, hits met, onsets on beats, variety, look-alikes (people and '
@@ -3118,6 +3141,7 @@ def apply_options(a):
     global MAX_HEROES, HERO_REUSE, ANIMAL_WORTH, W_PEOPLE, MAX_FLY, W_BEAUTY, W_PICKED, W_JOIN, W_ORDER, W_SIZE, W_ROLE
     W_ORDER, W_SIZE, W_ROLE = a.order, a.sizes, a.roles
     BUILD[0] = a.build
+    STORY[0] = len(a.must) if a.story else 0
     SECTIONS[0] = a.sections
     if a.lively:
         if a.sections:
