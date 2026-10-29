@@ -37,9 +37,11 @@ import av
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import paths
-from embedia import pix
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import paths
+from . import pix
 
 EVERY_S = 0.5
 TEXT_CACHE = os.path.join(paths.MODELS, 'clip', 'texts.npz')     # text embeddings computed so far
@@ -102,7 +104,7 @@ class Lazy:
         if self.parts is None:
             import torch  # noqa: F401
             from transformers import CLIPModel, CLIPProcessor
-            from embedia import gpu
+            from . import gpu
             dev = gpu.device()
             name = 'openai/clip-vit-base-patch32'
             self.parts = (CLIPModel.from_pretrained(name, cache_dir=self.cache).to(dev).eval(),

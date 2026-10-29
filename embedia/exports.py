@@ -17,8 +17,10 @@ import sys
 import av
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import pix
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import pix
 
 HZ = 10.0
 CUT_JUMP = 3.0      # a cut: thumbnail change this many times the export's median change, and over 12 (0-255)

@@ -62,9 +62,11 @@ import av
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import gpu
-from embedia import pix
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import gpu
+from . import pix
 
 NOSE, LEYE, REYE, LEAR, REAR, LSH, RSH, LEL, REL, LWR, RWR, LHIP, RHIP, LKN, RKN, LAN, RAN = range(17)
 KP_OK = 0.35
@@ -1366,7 +1368,7 @@ def main():
     ap.add_argument('--sim', type=float, default=WHO_SIM, help='who: CLIP cosine to the references')
     ap.add_argument('--originals', default=None, help='who: clip list, for references given as CLIP:SECONDS:X')
     ap.add_argument('--ref-dir', default='refs', help='who: where references cut from the clips are saved')
-    from embedia import paths
+    from . import paths
     ap.add_argument('--pose', default=os.path.join(paths.MODELS, 'yolo', 'yolov8s-pose.pt'),
                     help='who: the person detector for CLIP:SECONDS:X')
     ap.add_argument('--margin', type=float, default=WHO_MARGIN, help='who: lead over the next person')

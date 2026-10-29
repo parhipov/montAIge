@@ -23,8 +23,10 @@ import cv2
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))         # the repository: run as a file, embedia is a package
-from embedia import pix  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(HERE))
+    __package__ = os.path.basename(HERE)
+from . import pix  # noqa: E402
 
 LOOK_STEP = 5
 

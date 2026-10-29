@@ -28,6 +28,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))   # the repository: embedia, montaige (run as a file)
+import montaige  # noqa: E402, F401  (first: `embedia` is the package EMBEDIA names)
 from embedia import paths  # noqa: E402
 import embedia  # noqa: E402
 from embedia import pix  # noqa: E402

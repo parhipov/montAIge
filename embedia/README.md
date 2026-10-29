@@ -9,6 +9,9 @@ into the water", "the person on this screenshot", "where somebody laughs".
 It knows nothing of editing. [montAIge](../README.md) cuts films to music from it; any other project can open
 the same folder.
 
+Its imports are relative: a copy under another name (`embedia_ics`, a repository of its own) runs as that name
+(`python -m embedia_ics ...`) and builds and reads the same index; each feature records the package that made it.
+
 ## Quick start
 
 ```bash
@@ -101,9 +104,9 @@ Rebuilt from the features after every run, except `features`, `questions`, `meta
 | `passes` | close passes (`fpv`): `clip`, `t`, `kind` (between legs, under, over, past on its left / right, close; lying), `size`, `name` (who was passed) |
 | `captions` | `clip`, `t0`, `t1`, `text`; `captions_fts` searches it: `WHERE captions_fts MATCH 'jump*'` |
 | `phrases` | speech: `clip`, `t0`, `t1`, `voice`, `sung`, `snr`, `level`, `text`; `phrases_fts` as above |
-| `features` | `clip`, `step`, `version`, `made`, `embedia`, `frame`: which step version and embedia version made a clip's features, on which frame |
+| `features` | `clip`, `step`, `version`, `made`, `embedia`, `frame`: which step version and which embedia (package and version, `embedia_ics 0.1.0`; a bare version: `embedia`) made a clip's features, on which frame; a run warns of features another package made (its step versions are its own) |
 | `questions` | `kind`, `name`, `input` (JSON), `made`, `embedia` |
-| `meta` | `key`, `value`: `embedia_version`, `embedia_code` (git commit, +dirty), `created`, `built` |
+| `meta` | `key`, `value`: `embedia_package`, `embedia_version`, `embedia_code` (git commit, +dirty), `created`, `built` |
 
 ## Adding an analyzer
 

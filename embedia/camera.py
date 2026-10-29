@@ -20,8 +20,10 @@ import sys
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import gps  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import gps  # noqa: E402
 
 FLOWN_LF = 1.35         # m/s2 RMS of the acceleration magnitude under 5 Hz: over it, flown
 MIN_S = 4.0

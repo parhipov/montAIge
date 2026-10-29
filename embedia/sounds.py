@@ -19,8 +19,10 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import paths  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import paths  # noqa: E402
 
 NAME = 'laion/larger_clap_general'
 SR, WIN_S, HOP_S, BATCH = 48000, 2.0, 1.0, 32
@@ -43,7 +45,7 @@ class Lazy:
         if self.parts is None:
             import torch  # noqa: F401
             from transformers import ClapModel, ClapProcessor
-            from embedia import gpu
+            from . import gpu
             dev = gpu.device()
             m = ClapModel.from_pretrained(NAME, cache_dir=self.cache).to(dev).eval()
             if dev != 'cpu':

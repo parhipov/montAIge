@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repository: embedia, montaige (run as a file)
+import montaige  # noqa: E402, F401  (first: `embedia` is the package EMBEDIA names)
 from embedia import pix  # noqa: E402
 
 

@@ -27,9 +27,11 @@ import av
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))         # the repository: run as a file, embedia is a package
-from embedia import paths  # noqa: E402
-from embedia import pix  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(HERE))
+    __package__ = os.path.basename(HERE)
+from . import paths  # noqa: E402
+from . import pix  # noqa: E402
 
 MODEL = 'Qwen/Qwen3-VL-2B-Instruct'
 CACHE = os.path.join(paths.MODELS, 'vlm')
@@ -52,7 +54,7 @@ class VLM:
         if self.parts is None:
             import torch
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
-            from embedia import gpu
+            from . import gpu
             dev = gpu.device()
             model = Qwen3VLForConditionalGeneration.from_pretrained(self.name, cache_dir=self.cache, dtype=torch.float16,
                                                                     device_map=dev, attn_implementation='sdpa').eval()

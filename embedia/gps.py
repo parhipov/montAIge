@@ -20,8 +20,10 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia.mp4parse import open_mp4  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from .mp4parse import open_mp4  # noqa: E402
 
 # climb: altitude smoothed over this before the derivative (GPS altitude wobbles by metres from fix to fix)
 CLIMB_S = 4.0

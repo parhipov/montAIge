@@ -24,12 +24,13 @@ import argparse
 import os
 import sys
 
-if __package__ in (None, ''):                                    # run as a file
+if __package__ in (None, ''):                                    # run as a file: the package of its folder
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 
-import embedia  # noqa: E402
-from embedia import run as er  # noqa: E402
-from embedia import timeline  # noqa: E402
+from . import index  # noqa: E402
+from . import run as er  # noqa: E402
+from . import timeline  # noqa: E402
 
 
 def value(v):
@@ -50,8 +51,9 @@ def status(ix):
     kinds = [ix.frame_kind(s) or 'not measured' for s in srcs]
     m = ix.meta()
     print(f'{ix.root}: {len(srcs)} clips (' + ', '.join(f'{kinds.count(k)} {k}' for k in sorted(set(kinds)))
-          + f'), {have} proxies kept; built {m.get("built", "never")} by embedia '
-          f'{m.get("embedia_version", "?")} ({m.get("embedia_code") or "no git"}); this is {embedia.__version__}')
+          + f'), {have} proxies kept; built {m.get("built", "never")} by '
+          f'{m.get("embedia_package", "embedia")} {m.get("embedia_version", "?")} ({m.get("embedia_code") or "no git"}); '
+          f'this is {index.MADE_BY}')
     for st in er.STEPS:
         if not st.on(ix.cfg):
             continue
@@ -117,10 +119,10 @@ def main():
         for kv in a.set:
             k, _, v = kv.partition('=')
             cfg[k.strip()] = value(v.strip())
-        ix = embedia.create(a.index, cfg)
+        ix = index.create(a.index, cfg)
         print(f'{ix.root}: embedia.toml written')
         return
-    ix = embedia.open(a.index)
+    ix = index.open(a.index)
     if a.cmd == 'run':
         er.everything(ix, a.join)
     elif a.cmd == 'scan':

@@ -61,8 +61,9 @@ import time
 import av
 import numpy as np
 
-from embedia import paths
-from embedia.read import export_of, stabilized_before
+from . import index
+from . import paths
+from .read import export_of, stabilized_before
 
 ROOT = paths.ROOT
 MODELS = paths.MODELS
@@ -99,13 +100,13 @@ def short_cmd(cmd):
 
 
 def command(module, args, py=None):
-    """`python -m embedia.<module> args`, from the repository (another Python, e.g. the speech venv, too)."""
-    return [py or sys.executable, '-m', f'embedia.{module}'] + [str(a) for a in args]
+    """`python -m <this package>.<module> args`, from the repository (another Python, e.g. the speech venv, too)."""
+    return [py or sys.executable, '-m', f'{__package__}.{module}'] + [str(a) for a in args]
 
 
 def env():
     e = dict(os.environ)
-    e['PYTHONPATH'] = ROOT + (os.pathsep + e['PYTHONPATH'] if e.get('PYTHONPATH') else '')
+    e['PYTHONPATH'] = os.path.dirname(paths.HERE) + (os.pathsep + e['PYTHONPATH'] if e.get('PYTHONPATH') else '')
     return e
 
 
@@ -128,7 +129,7 @@ def run(module, args, log=None, py=None):
 
 # ------------------------------------------------------------------------------------------- what a clip is
 def has_track(path, fourcc):
-    from embedia.mp4parse import open_mp4
+    from .mp4parse import open_mp4
     try:
         f, _, _, tracks = open_mp4(path)
         f.close()
@@ -146,7 +147,7 @@ def gyroflow_motion(path, cache):
         return True
     if not has_track(path, b'djmd'):
         return True
-    from embedia import djimeta
+    from . import djimeta
     try:
         djimeta.frame_quats(path)
     except SystemExit:
@@ -229,7 +230,7 @@ def has_picture(path):
 
 
 def scan(ix, join=False):
-    from embedia import dji_join
+    from . import dji_join
     footage = ix.cfg.get('footage') or []
     if not footage:
         raise SystemExit(f'{ix.root}: no footage in embedia.toml')
@@ -310,7 +311,7 @@ def frame_for(ix, c):
 def write_recipe(ix, c, tool, call=None):
     """The clip's recipe beside its features: the frame they are measured on, the proxy's size, fps and frame count
     (the timeline reads them when the proxy is gone), when the recording began, how Gyroflow was called."""
-    from embedia.read import creation_time
+    from .read import creation_time
     with av.open(ix.render(c)) as ct:
         st = ct.streams.video[0]
         n, fps, w, h = st.frames, float(st.average_rate), st.codec_context.width, st.codec_context.height
@@ -579,9 +580,21 @@ def carried_pilot(ix, kinds):
             np.save(ix.path(c, 'pilot'), np.zeros(len(ix.get(c, 'people')['frame']), bool))
 
 
+def made_elsewhere(ix):
+    """Features another embedia made (a copy under another name): kept, though its step versions are its own (a
+    step it raised is not made again here). A WARN line naming them."""
+    rows = ix.sql('SELECT step, embedia, COUNT(*) AS n FROM features GROUP BY step, embedia ORDER BY step')
+    other = [f'{r["step"]} {r["n"]} clips by {r["embedia"] if " " in (r["embedia"] or "") else "embedia"}'
+             for r in rows if index.package_of(r['embedia']) != index.PACKAGE]
+    if other:
+        print(f'WARN features made by another embedia than this {index.MADE_BY}, kept (`analyze --redo STEP` '
+              f'makes them here): ' + ', '.join(other))
+
+
 def features(ix, only=None, redo=()):
     """Every step of STEPS that embedia.toml turns on, over the clips it is for that need it; a step that reads the
     picture gets the proxies it lacks first."""
+    made_elsewhere(ix)
     os.makedirs(ix.proxy_dir, exist_ok=True)
     adopt_recipes(ix)
     log = os.path.join(ix.log_dir, 'features.log')
@@ -602,7 +615,7 @@ def features(ix, only=None, redo=()):
         if not todo:
             continue
         if not ran:
-            from embedia import gpu
+            from . import gpu
             gpu.device()
             ran = True
         on = ix.made_on(step.name)
@@ -712,7 +725,7 @@ def ask(ix, kind, inp, name='', force=False):
             for f in (files(ix, old['input'], name) if old else []):
                 if ix.has(c, f):
                     os.remove(ix.path(c, f))
-    from embedia import gpu
+    from . import gpu
     gpu.device()
     args = cmd(ix, inp, name)
     if run(module, args, log_of(ix)):
@@ -732,7 +745,7 @@ def reask(ix):
 
 # ------------------------------------------------------------------------------------------- all of it
 def timeline(ix):
-    from embedia import timeline as tl
+    from . import timeline as tl
     tl.build(ix)
 
 

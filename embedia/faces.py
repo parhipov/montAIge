@@ -29,11 +29,13 @@ import av
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import gpu
-from embedia import paths
-from embedia import pix
-from embedia import people as pp
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import gpu
+from . import paths
+from . import pix
+from . import people as pp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SFACE = os.path.join(paths.MODELS, 'faces', 'face_recognition_sface_2021dec.onnx')

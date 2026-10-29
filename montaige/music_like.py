@@ -24,6 +24,7 @@ import urllib.request
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repository: embedia, montaige (run as a file)
+import montaige  # noqa: E402, F401  (first: `embedia` is the package EMBEDIA names)
 from embedia import paths  # noqa: E402
 from embedia import sounds  # noqa: E402
 

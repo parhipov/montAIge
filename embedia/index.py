@@ -15,7 +15,7 @@ Layout (every path from here):
                     (who by screenshots, a main character in words, beautiful views, the shoot's activities) with
                     its input, asked again for clips added later; the timeline tables (timeline.py: t, clips, people,
                     labels, passes, captions, phrases), rebuilt from the features after every run; `meta`: the
-                    embedia version and code that built it, when
+                    embedia package, version and code that built it, when
   proxy/            per clip its features, <stem>_stabilized_<feature>.npz | .npy | .json, and the frame they were
                     measured on, <stem>_stabilized_recipe.json: "stabilized" (a Gyroflow render of a clip with motion
                     data, `stabilize = true`: the proxy <stem>_stabilized.mp4 is kept, how Gyroflow was called is
@@ -41,7 +41,9 @@ import tomllib
 
 import numpy as np
 
-VERSION = '0.1.0'       # embedia's own (pyproject.toml's too): in `meta` and on every feature and question
+VERSION = '0.1.0'       # embedia's own (pyproject.toml's too)
+PACKAGE = __package__   # embedia, or a copy of it under another name (embedia_ics): one index, either of them
+MADE_BY = f'{PACKAGE} {VERSION}'                 # in `meta` and on every feature and question
 CONFIG = 'embedia.toml'
 DB = 'embedia.sqlite'
 # a feature's file next to its proxy: .npz unless listed here
@@ -55,8 +57,13 @@ PERSISTENT = ('CREATE TABLE IF NOT EXISTS features (clip TEXT, step TEXT, versio
               'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
 
 
+def package_of(made_by):
+    """The package of a feature's or question's `embedia` ("embedia_ics 0.1.0"; a bare version: embedia's)."""
+    return made_by.split()[0] if made_by and ' ' in made_by else 'embedia'
+
+
 def code():
-    """The embedia code an index is built with: its git commit, +dirty with uncommitted changes in embedia/; None
+    """The embedia code an index is built with: its git commit, +dirty with uncommitted changes in the package; None
     outside a git checkout."""
     import subprocess
     here = os.path.dirname(os.path.abspath(__file__))
@@ -244,12 +251,13 @@ class Index:
         return con
 
     def stamp(self):
-        """`meta`: which embedia built the index (version, code) and when (created, built)."""
+        """`meta`: which embedia built the index (package, version, code) and when (created, built)."""
         now = datetime.datetime.now().isoformat(timespec='seconds')
         with self.db() as con:
             con.execute("INSERT OR IGNORE INTO meta VALUES ('created', ?)", (now,))
             con.executemany('INSERT OR REPLACE INTO meta VALUES (?, ?)',
-                            [('embedia_version', VERSION), ('embedia_code', code()), ('built', now)])
+                            [('embedia_package', PACKAGE), ('embedia_version', VERSION), ('embedia_code', code()),
+                             ('built', now)])
 
     def meta(self):
         with self.db() as con:
@@ -278,7 +286,7 @@ class Index:
         with self.db() as con:
             con.executemany('INSERT OR REPLACE INTO features (clip, step, version, made, embedia, frame) '
                             'VALUES (?,?,?,?,?,?)',
-                            [(self.stem(c), step, version, now, VERSION, self.frame_kind(c) if picture else None)
+                            [(self.stem(c), step, version, now, MADE_BY, self.frame_kind(c) if picture else None)
                              for c in clips])
 
     def questions(self):
@@ -295,7 +303,7 @@ class Index:
         now = datetime.datetime.now().isoformat(timespec='seconds')
         with self.db() as con:
             con.execute('INSERT OR REPLACE INTO questions (kind, name, input, made, embedia) VALUES (?,?,?,?,?)',
-                        (kind, name, json.dumps(inp, ensure_ascii=False, sort_keys=True), now, VERSION))
+                        (kind, name, json.dumps(inp, ensure_ascii=False, sort_keys=True), now, MADE_BY))
 
     # ------------------------------------------------------------------- search in words
     def search(self, text, by='image', top=5, clip_cache=None):
@@ -307,20 +315,20 @@ class Index:
         renders = [r for _, r in pairs]
         name = {r: self.stem(s) for s, r in pairs}
         if by == 'image':
-            from embedia import paths, places
+            from . import paths, places
             hit = places.find(renders, text, clip_cache or os.path.join(paths.MODELS, 'clip'))
             return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(hit[3]))]
         if by == 'sound':
-            from embedia import sounds
+            from . import sounds
             half = sounds.PIECE_S / 2
             return [dict(clip=name[r], t0=max(t - half, 0.0), t1=t + half, score=float(p))
                     for p, r, t in sounds.moments(pairs, text, top=top)]
         if by == 'caption':
-            from embedia import captions
+            from . import captions
             hit = captions.find(renders, text)
             return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(len(hit[3])))]
         if by == 'speech':
-            from embedia import speech
+            from . import speech
             return [dict(clip=name[r], t0=t0, t1=t1, score=float(sh), text=tx, voice=v)
                     for r, t0, t1, tx, v, sh in speech.find(renders, text, top=top)]
         raise ValueError(f'by={by!r}: image, sound, caption or speech')

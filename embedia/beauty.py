@@ -23,9 +23,11 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))         # the repository: run as a file, embedia is a package
-from embedia import paths  # noqa: E402
-from embedia import places  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(HERE))
+    __package__ = os.path.basename(HERE)
+from . import paths  # noqa: E402
+from . import places  # noqa: E402
 
 AES_HEAD = os.path.join(paths.MODELS, 'aesthetic', 'sa_0_4_vit_b_32_linear.pth')
 MUNDANE = ['a parking lot', 'a dirt yard', 'grass up close', 'the ground up close', 'a road with cars',

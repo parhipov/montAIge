@@ -36,6 +36,8 @@ the job's name is its folder (or `name = ...`). What the footage is and which an
                                              # models/venvs/speech
     hfov = 92                                # field of view of clips stabilized before (vis_motion.py)
     index = "out/trip/index"                 # another index than out/<job>/index (one shoot, several jobs)
+    embedia = "embedia_ics"                  # the embedia package that builds and reads it (default embedia, or
+                                             # EMBEDIA): a copy under another name, the same index
 
 The job's own questions to the index (kept there with their input, asked again for clips added later):
 
@@ -89,6 +91,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))   # the repository: embedia, montaige (run as a file)
+import montaige  # noqa: E402  (first: `embedia` is the package EMBEDIA names)
 import embedia  # noqa: E402
 from embedia import paths  # noqa: E402
 from embedia import run as er  # noqa: E402
@@ -357,11 +360,15 @@ def main():
                     'version is a new [[edit]], the ones watched before are not made again')
     ap.add_argument('--size', default='3840x2880', help='final size, e.g. 3840x2880 (4:3) or 1920x1080')
     a = ap.parse_args()
-    from embedia import gpu
-    gpu.device()
     job_path = os.path.abspath(a.job)
     with open(job_path, 'rb') as fh:
         job = tomllib.load(fh)
+    if job.get('embedia', montaige.EMBEDIA) != montaige.EMBEDIA:    # the job's embedia: the run again with it, and
+        sys.exit(subprocess.run([sys.executable, os.path.abspath(__file__)] + sys.argv[1:],   # every step it starts
+                                env={**os.environ, 'EMBEDIA': job['embedia']}).returncode)
+    print(f'montage: {embedia.__name__} {embedia.__version__}')
+    from embedia import gpu
+    gpu.device()
     os.chdir(ROOT)
     name = job.get('name') or os.path.basename(os.path.dirname(job_path))
     out = os.path.join('out', name)

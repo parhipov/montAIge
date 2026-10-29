@@ -17,8 +17,10 @@ import time
 import av
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import pix
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import pix
 
 GROUPS = {
     'person': {0},
@@ -139,7 +141,7 @@ def main():
     if not a.summary:
         if not a.weights:
             raise SystemExit('--weights is needed to detect')
-        from embedia import gpu
+        from . import gpu
         gpu.device()
         from ultralytics import YOLO
         model = YOLO(a.weights)

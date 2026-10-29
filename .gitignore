@@ -13,3 +13,5 @@ __pycache__/
 .claude/settings.local.json
 # dji_join.py downloads it on first use
 embedia/mp4_merge.exe
+# a copy of embedia in a repository of its own (gitlab.ics.com/parkhipov/embedia), used through a job's `embedia`
+embedia_ics/

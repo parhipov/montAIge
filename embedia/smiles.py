@@ -31,8 +31,10 @@ import cv2
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))         # the repository: run as a file, embedia is a package
-from embedia import pix  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(HERE))
+    __package__ = os.path.basename(HERE)
+from . import pix  # noqa: E402
 
 PROMPT = 'Is this person smiling? Answer yes or no.'
 MIN_AREA, STEP_S, BATCH, MAX_NEW = 0.06, 1.0, 8, 16
@@ -192,7 +194,7 @@ def main():
     ap.add_argument('--top', type=int, default=20, help='stretches printed')
     ap.add_argument('--sheet', default=None, help='a picture of the heads counted as smiling')
     a = ap.parse_args()
-    from embedia.captions import VLM
+    from .captions import VLM
     vlm, t0, n, found, shown = VLM(), time.time(), 0, [], []
     for r in a.renders:
         fr, sm, hd, fps = smiles(r, vlm, a.min_area, a.step, a.batch, a.force)

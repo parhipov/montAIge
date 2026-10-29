@@ -142,6 +142,8 @@ sounds = true                                     # the clips' own sound (hear: 
 captions = true                                   # the footage in words every 3 s (cap: pieces, review in qc)
 speech = "ru"                                     # what people say, who says it (say: pieces, --talk N on
                                                   # request; venv models/venvs/speech); off by default: costly
+embedia = "embedia_ics"                           # the embedia package of the job (default embedia, or EMBEDIA):
+                                                  # a copy under another name, its own repository, the same index
 args = ["--people", "4"]                          # edit.py options of every edit, before each edit's own
 
 [[edit]]

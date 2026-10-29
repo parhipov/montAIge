@@ -25,7 +25,7 @@ Tables:
           h (centre and size, shares of the frame), area, facing, waving, name (main character or NULL)
   passes  people.py passes (fpv): clip, t, kind (between legs, under, over, past on its left / right, close; lying),
           size, name (the main character passed, from the labels of the second before, or NULL)
-  meta    key, value: embedia_version, embedia_code (git commit, +dirty), created, built (kept by a rebuild)
+  meta    key, value: embedia_package, embedia_version, embedia_code (git commit, +dirty), created, built (kept by a rebuild)
   labels  the answers of `who` and `subject` (questions asked of the index): one row per person row labelled as a
           main character: name, clip, t, frame, track, area (several names on one person: a row each)
   captions  one row per captioned chunk: clip, t0, t1, text; captions_fts (FTS5) searches the words:
@@ -43,8 +43,10 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))         # the repository: run as a file, embedia is a package
-from embedia import paths  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(HERE))
+    __package__ = os.path.basename(HERE)
+from . import paths  # noqa: E402
 
 GRID_S = 0.5
 
@@ -63,7 +65,7 @@ def activity_labels(renders, cache):
     """{render: (frames, label, p)} on the CLIP samples: from <render>_activities.npz where places.py activities
     ran (it carries the job's own --text activities: "welding with sparks" in a factory), else from the general
     list on the embeddings (places.py embed); {} without either."""
-    from embedia import places
+    from . import places
     out, todo = {}, []
     for r in renders:
         a = os.path.splitext(r)[0] + '_activities.npz'
@@ -95,8 +97,8 @@ TABLES = ('captions_fts', 'phrases_fts', 'clips', 't', 'people', 'labels', 'pass
 
 def build(ix, clip_cache=None):
     import datetime
-    from embedia import read
-    from embedia import speech
+    from . import read
+    from . import speech
     proxy, cache = ix.proxy_dir, ix.cache_dir
     pairs = ix.measured()                                        # the features, not the proxies: those may be gone
     names = sorted({n for _, r in pairs for n in subject_names(os.path.splitext(r)[0])})
@@ -289,8 +291,8 @@ def main():
     ap.add_argument('--limit', type=int, default=40)
     ap.add_argument('--clip-cache', default=os.path.join(paths.MODELS, 'clip'))
     a = ap.parse_args()
-    import embedia
-    ix = embedia.open(a.index)
+    from . import index
+    ix = index.open(a.index)
     if a.sql:
         ask(ix, a.sql, a.limit)
         return

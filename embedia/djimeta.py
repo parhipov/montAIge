@@ -15,9 +15,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import pb
-from embedia.mp4parse import open_mp4
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import pb
+from .mp4parse import open_mp4
 
 F_FRAME = 3                                   # ProductMeta.frame_meta
 FRAME_IMU = 3                                 # FrameMeta.imu_frame_meta

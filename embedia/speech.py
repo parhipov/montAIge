@@ -32,8 +32,10 @@ import wave
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # run as a file
-from embedia import paths  # noqa: E402
+if not __package__:                               # run as a file: the package of its folder (PEP 366)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+from . import paths  # noqa: E402
 
 SR = 16000                                                      # what pyannote and Whisper run at
 DIARIZATION = os.path.join(paths.MODELS, 'diarization', 'speaker-diarization-community-1')
@@ -70,7 +72,7 @@ def load(render):
 
 
 def pairs_of(listfile, proxy_dir):
-    from embedia import sounds
+    from . import sounds
     return sounds.pairs_of(listfile, proxy_dir)
 
 
@@ -190,7 +192,7 @@ def db(x):
 def analyse(original, render, models, language):
     """-> the clip's speech dict, cached in <render>_speech.json."""
     import torch
-    from embedia import sounds
+    from . import sounds
     from scipy.signal import resample_poly
     p = cache_path(render)
     if os.path.exists(p):
@@ -269,7 +271,7 @@ class Models:
 
     def __call__(self, diarize=False, asr=False, clap=False):
         import torch
-        from embedia import gpu
+        from . import gpu
         dev = gpu.device()
         if diarize and self.pipe is None:
             from pyannote.audio import Pipeline
@@ -281,7 +283,7 @@ class Models:
                                 dtype=torch.float16 if dev == 'cuda' else torch.float32,
                                 model_kwargs={'cache_dir': os.path.join(paths.MODELS, 'whisper')})
         if clap and self.clap is None:
-            from embedia import sounds
+            from . import sounds
             self.clap = sounds.Lazy()
             self.clap.load()
         return self.pipe, self.asr, self.clap
@@ -354,7 +356,7 @@ def voices(pairs, out, same=SAME):
 
 def portraits(data, folder, names):
     """PORTRAIT_S of each voice from its longest turns spoken alone -> folder/V1.wav (16 kHz)."""
-    from embedia import sounds
+    from . import sounds
     from scipy.signal import resample_poly
     os.makedirs(folder, exist_ok=True)
     turns, cache = {}, {}

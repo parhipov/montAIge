@@ -6,5 +6,5 @@ words or by example afterwards (index.py: the layout and the Python interface; r
     python -m embedia run out/trip/index
     python -m embedia search out/trip/index "a jump into the water"
 """
-from embedia.index import VERSION as __version__  # noqa: F401
-from embedia.index import Index, cache_of, create, open  # noqa: F401, A004
+from .index import VERSION as __version__  # noqa: F401
+from .index import Index, cache_of, create, open  # noqa: F401, A004

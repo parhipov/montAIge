@@ -68,7 +68,7 @@ def load_telemetry(src, cache_dir):
     if os.path.exists(cp):
         z = np.load(cp)
         return z['q'].astype(np.float64), float(z['fps'])
-    from embedia import djimeta
+    from . import djimeta
     n, fps = frame_count(src)
     q = djimeta.per_frame(src, n)
     os.makedirs(cache_dir, exist_ok=True)
