@@ -109,7 +109,10 @@ renders (same frame count as the original), telemetry from the original.
   its gyro to a `.gcsv` beside the clip (RunCam Thumb Pro W: 1000 Hz, its lens profile named in the header,
   Gyroflow's sync within 20 ms).
 - **Trimming.** The first 3 s and the last 5 s go; a spike over 1300°/s near the end is a crash and
-  everything after it goes; so does any 2 s with neither vibration nor rotation, and blown-out or black frames.
+  everything after it goes; so does any 2 s on the ground (vibration under 1.5 and rotation under 3°/s, and the
+  motors off, vibration under 0.3, or the picture standing still), and blown-out or black frames. Vibration alone
+  took a smooth glide past people for the ground (motors off 0.07-0.08, a glide 0.6-1.3 with the picture moving
+  0.2-3 px; in the air p5 0.79-1.03), and the hop rule threw away up to 20 s around each: 75 s of one flight.
   Crashes: manoeuvres peaked at 900-950°/s in 136 clips of nine jobs (the pilots' rate limit), five mid-flight
   peaks of 1590-1930 were all crashes, and a RunCam Thumb's gyro stops at 1000°/s per axis, so its crashes peaked
   at 1620-1730 and never met the old 2000; between 1000 and 1300 one was a crash, one a fast turn inside a shed.

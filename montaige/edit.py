@@ -67,6 +67,11 @@ UP = np.array([0.0, 0.0, -1.0])     # world up in DJI's fused frame (image-down 
 # GH010401 against its gyro: on the ground median 0.07 (people walking by: p90 0.5), in the air p1 0.11, p5 0.16;
 # at 0.1 nothing of the flight is taken for the ground and 41 % of the ground is missed, at 0.2 2 % and 28 %
 STILL_FLOW = 0.12
+# on the ground, by the gyro: vibration (rms of the rates above 2 Hz, deg/s) and rotation low, and the motors off
+# (vibration under VIB_OFF) or the picture standing still (STILL_FLOW). Six GoPro FPV flights: the motors off
+# 0.07-0.08, in the air p5 0.79-1.03; a smooth glide past people 0.6-1.3 with the picture moving 0.2-3 px, under the
+# 1.5 alone it was the ground, and the hop rule threw away up to 20 s around it
+VIB_OFF = 0.3
 # landings: LANDING_S before a stretch on the ground (Flight._usable). Every Dagestan clip ended in a slow
 # approach, a flop at the touchdown (40-190 deg/s, read as a roll) and the ground; the owner called the 8 s before a
 # touchdown among people "a dull landing, not the point", and "a landing can be an ending": a window pays W_LANDING x
@@ -721,6 +726,9 @@ class Flight:
             hf = self.rates - uniform_filter1d(self.rates, int(fps / 2), axis=0)
             vib = np.sqrt(uniform_filter1d((hf ** 2).sum(1), int(2 * fps)))
             calm = (vib < 1.5) & (self.vis < 3.0)
+            if self.flow is not None:                            # a smooth glide is as calm by the gyro: on the
+                calm &= (vib < VIB_OFF) | (self.flow['flow'] < STILL_FLOW)   # ground the motors are off or the
+                                                                 # picture stands still
         still = uniform_filter1d(calm.astype(float), int(2 * fps)) > 0.9
         if not carried_of(self):                                 # a hand camera held still or set down is a shot
             u &= ~still
