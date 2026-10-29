@@ -87,7 +87,7 @@ def open(path):  # noqa: A001  (embedia.open, like sqlite3.connect)
     if not os.path.exists(os.path.join(p, CONFIG)) and os.path.exists(os.path.join(p, 'index', CONFIG)):
         p = os.path.join(p, 'index')
     if not os.path.exists(os.path.join(p, CONFIG)):
-        raise SystemExit(f'no index in {path}: {CONFIG} missing (python -m embedia init)')
+        raise SystemExit(f'no index in {path}: {CONFIG} missing (python -m {PACKAGE} init)')
     return Index(p)
 
 

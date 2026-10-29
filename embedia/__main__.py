@@ -69,7 +69,8 @@ def status(ix):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog='python -m embedia', description=__doc__,
+    ap = argparse.ArgumentParser(prog=f'python -m {__package__}',          # a copy under another name: its own
+                                 description=__doc__.replace('python -m embedia ', f'python -m {__package__} '),
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init')
