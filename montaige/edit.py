@@ -544,6 +544,22 @@ def load_people(stab, proxy_dir, n):
     return out + bump
 
 
+def apply_skips(flights, skips):
+    """--skip CLIP:START-END: footage never used (a crew member walking in, the singer frontal at the mic when the
+    sound is not his, the pilot's legs); a --must inside it wins. edl_edit.py --replace takes them too."""
+    for spec in skips:
+        stem, sec = spec.rsplit(':', 1)
+        f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
+        if f is None:
+            raise SystemExit(f'--skip {spec}: no such clip among the flights')
+        lo, hi = (int(round(float(v) * f.fps)) for v in sec.split('-'))
+        f.usable[max(lo, 0):min(hi, f.n)] = False
+        f.cu = csum(f.usable.astype(np.float64))
+        if not hasattr(f, 'skipped'):
+            f.skipped = np.zeros(f.n, bool)
+        f.skipped[max(lo, 0):min(hi, f.n)] = True
+
+
 def set_beauty(flights):
     """f.view per frame (see W_BEAUTY) and its share of the cinematic score; flights without beauty.py get none."""
     seen = [f for f in flights if getattr(f, 'beauty', None) is not None]
@@ -3307,17 +3323,7 @@ def main():
     print(f'  sections (and energy) per phrase: {" ".join(f"{s}{c}" for s, c in zip(sec, cls))}; chorus '
           + (f'{chorus}' + ('' if chorus in sec else ' (not in the cut)') if chorus else 'none')
           + ('' if music_path == a.music else f'; whole track {"".join(sec_whole)}'))
-    for spec in a.skip:                                          # --skip: footage never used (a crew member walking
-        stem, sec = spec.rsplit(':', 1)                          # in, the singer frontal at the mic when the sound is
-        f = next((f for f in flights if f.name.lower() == os.path.splitext(os.path.basename(stem))[0].lower()), None)
-        if f is None:                                            # not his, the pilot's legs); a --must inside it wins
-            raise SystemExit(f'--skip {spec}: no such clip among the flights')
-        lo, hi = (int(round(float(v) * f.fps)) for v in sec.split('-'))
-        f.usable[max(lo, 0):min(hi, f.n)] = False
-        f.cu = csum(f.usable.astype(np.float64))
-        if not hasattr(f, 'skipped'):
-            f.skipped = np.zeros(f.n, bool)
-        f.skipped[max(lo, 0):min(hi, f.n)] = True
+    apply_skips(flights, a.skip)
     if a.skip:
         print(f'  skipped: {len(a.skip)} pieces, {sum(float(v.split(":")[-1].split("-")[1]) - float(v.split(":")[-1].split("-")[0]) for v in a.skip):.0f} s')
     musts, heard, said = [], [], []                              # hear:TEXT and say: pieces, for their sound (bites)

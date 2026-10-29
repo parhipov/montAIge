@@ -193,6 +193,7 @@ def replace(e, ks, o, cache, clip=None):
     rng = edit.apply_options(o)
     flights = load_flights(e, cache)
     edit.prepare_flights(flights, o)
+    edit.apply_skips(flights, o.skip)                            # the job's --skip (they were left out here)
     m = edit.analyse_music(e['music'], e['bpm'], booms=e.get('booms', False))
     acc, d0 = m['acc'], m['downbeat']
     scenes = []
