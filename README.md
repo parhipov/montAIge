@@ -239,7 +239,9 @@ AGPL like the rest, and its README there gives the credits.
 | `music_like.py` | catalogue tracks that sound like one the owner liked (CLAP) |
 
 `tools/`: `lut_clips.py`, whole clips graded with a LUT on the GPU at their own size, 10-bit in and out (a delivery
-of stabilized clips without an edit); `trimtest.py`, Gyroflow's trimmed renders against whole-clip ones.
+of stabilized clips without an edit); `trimtest.py`, Gyroflow's trimmed renders against whole-clip ones;
+`flow_gyro.py`, a Gyroflow project for a camera with no gyro on a tripod, zooms included, its motion read from the
+picture.
 
 ## Not implemented yet
 

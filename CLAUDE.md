@@ -12,7 +12,8 @@ the early jobs with the owner's comments (later ones stay local, `out/<job>/exam
 embedia/                    the index: footage -> proxies, features, embedia.sqlite; knows nothing of editing,
                             used by other projects too (embedia/README.md)
 montaige/                   the montage: music, edits, QC, finals, from an index (python -m montaige JOB.toml)
-tools/                      standalone utilities: lut_clips.py (whole clips graded, no edit), trimtest.py
+tools/                      standalone utilities: lut_clips.py (whole clips graded, no edit), trimtest.py,
+                            flow_gyro.py (a Gyroflow project for a camera with no gyro, from the picture)
 docs/notes.md               methods, measurements, ideas not done yet
 docs/examples/<job>.md      early jobs: footage, task, edits, comments, what it taught (new ones: out/<job>/)
 models/                     inputs that are not footage (not in git): music/, luts/, yolo/, clip/, faces/
@@ -293,6 +294,10 @@ tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
   and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `embedia/gf_render.py
   --codec hevc10 --width W --height H --bitrate 120M` at the source size, given, not left to Gyroflow, then this;
   `--wait` grades each clip as Gyroflow finishes it; the clip's sound comes through).
+- `tools/flow_gyro.py CLIP [...]`: a camera with no gyro on a tripod, zoom lens included (a Sony a6400): the picture's
+  motion a frame -> `CLIP.gyroflow` beside the clip (open it in Gyroflow; the orientation of every frame inside,
+  taken as it is), `.gcsv`, a pinhole `_lens.json`; `--check RENDER --from S`: the shake a render has left. Not in
+  the pipeline.
 
 ## After a job
 
