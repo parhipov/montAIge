@@ -1872,9 +1872,11 @@ def place_moments(scenes, flights, musts, pools, used, rng):
         if last and len(scenes) > 2:
             # a track's last phrase can be a tail of a few seconds: the sunset climb (5.5 s) ran at 1.7x in a 3.3 s
             # one. Then the ending takes the scene before it too, as edl_edit.py --end-from does, and plays near 1x
+            # (a say: ending at 1x only: 7.9 s of speech in a 6.8 s last phrase found no scene)
             prev = scenes[-2]
             fit = (span + PIECE_AIR_S * f.fps) / max(source_frames(merged(scenes[-1]['shots']), f), 1)
-            if fit > END_MERGE_SPEED and not (prev['hero'] or prev.get('must') or prev['kind'] == 'pickup'):
+            if fit > (1.0 if talk else END_MERGE_SPEED) and not (prev['hero'] or prev.get('must') or
+                                                                 prev['kind'] == 'pickup'):
                 tail = scenes[-1]['shots'][-1]['t1'] - scenes[-1]['shots'][0]['t0']
                 scenes[-2:] = [dict(scenes[-1], shots=prev['shots'] + scenes[-1]['shots'])]
                 scenes[-1]['idx'] = len(scenes) - 1
@@ -3416,7 +3418,9 @@ def main():
             raise SystemExit(f'{spec}: no such clip among the flights')
         if '-' in sec:                                           # a piece, shown whole
             lo, hi = (int(round(float(v) * f.fps)) for v in sec.split('-'))
-            end_at = hi if last else None
+            # the ending's shot stops within 0.3 s of end_at: a say: ending is moved on by that, or its last word
+            # is cut and the phrase loses its sound (bites hold a phrase only whole; 9.64 s of one to 9.9 s)
+            end_at = (hi + int(0.3 * f.fps) if talk else hi) if last else None
         else:                                                    # a moment: 0.5 s before to 1 s after it
             fr = int(round(float(sec) * f.fps))
             lo, hi = fr - int(0.5 * f.fps), fr + int(1.0 * f.fps)
