@@ -1,6 +1,7 @@
 """Camera motion from the picture, for footage that was stabilized elsewhere and has no gyro left in the file.
 
-    python vis_motion.py RENDER.mp4 [...] [--hfov DEG | --calibrate] [--rate HZ]   ->  <render>_vis.npz next to each
+    python -m embedia.analyzers.vis_motion RENDER.mp4 [...] [--hfov DEG | --calibrate] [--rate HZ]
+                                                                            ->  <render>_vis.npz next to each
 
 The proxy is the stabilized picture, so what it shows is the smoothed camera path: the motion edit.py looks at
 anyway (the visible, 1.5 Hz low-passed rotation). Per pair of frames: corners tracked with pyramidal Lucas-Kanade
@@ -32,11 +33,7 @@ import av
 import cv2
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(HERE))
-    __package__ = os.path.basename(HERE)
-from . import pix  # noqa: E402
+from ..media import pix
 
 FB_PX = 1.0             # forward-backward tracking error that keeps a track
 RANSAC_PX = 1.5         # inlier distance of the rotation fit, px

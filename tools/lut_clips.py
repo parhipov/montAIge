@@ -1,5 +1,5 @@
 """Apply a .cube LUT to whole clips on the GPU: 10-bit HEVC in, 10-bit HEVC (NVENC) out, the same size and
-frame rate. For a delivery of whole clips (stabilize and grade, no edit): first `python -m embedia.gf_render --codec
+frame rate. For a delivery of whole clips (stabilize and grade, no edit): first `python -m embedia.media.gf_render --codec
 hevc10 --width W --height H --bitrate 120M` at the clip's own size (given, not left to Gyroflow), then this.
 
     GPU_PY tools/lut_clips.py PAIRS.json --lut FILE.cube [--bitrate 120M] [--limit N] [--cpu] [--wait]

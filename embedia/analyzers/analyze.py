@@ -1,6 +1,6 @@
 """Image motion features and look thumbnails of small stabilized renders (any aspect).
 
-    python analyze.py RENDER.mp4 [...] [--workers N]   ->  <render>_flow.npz, <render>_look.npz next to each
+    python -m embedia.analyzers.analyze RENDER.mp4 [...] [--workers N]   ->  <render>_flow.npz, <render>_look.npz next to each
 
 Flow features at half the frame rate (every 2nd frame), from 160-px-wide grey frames:
   flow      mean |optical flow| px per frame pair
@@ -15,18 +15,13 @@ Clips are analysed --workers at a time (processes: the flow is single-threaded C
 import argparse
 import multiprocessing
 import os
-import sys
 import time
 
 import av
 import cv2
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(HERE))
-    __package__ = os.path.basename(HERE)
-from . import pix  # noqa: E402
+from ..media import pix
 
 LOOK_STEP = 5
 

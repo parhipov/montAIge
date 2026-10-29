@@ -1,7 +1,7 @@
 """What is in the picture: YOLO (COCO) on the small renders, a few times a second, reduced to numbers.
 
-    python objects.py --weights models/yolo/yolov8s.pt RENDER.mp4 [...]   ->  <render>_objects.npz
-    python objects.py --summary RENDER.mp4 [...]                           (no detection, just the report)
+    python -m embedia.analyzers.objects --weights models/yolo/yolov8s.pt RENDER.mp4 [...]   -> <render>_objects.npz
+    python -m embedia.analyzers.objects --summary RENDER.mp4 [...]       (no detection, just the report)
 
 Per sampled frame and per group (people, vehicles, animals): how many, and the share of the frame
 the biggest one covers. Nothing per box is kept. On top of that, people_motion() turns the size of
@@ -11,16 +11,12 @@ the raw detections are never printed.
 """
 import argparse
 import os
-import sys
 import time
 
 import av
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import pix
+from ..media import pix
 
 GROUPS = {
     'person': {0},
@@ -141,7 +137,7 @@ def main():
     if not a.summary:
         if not a.weights:
             raise SystemExit('--weights is needed to detect')
-        from . import gpu
+        from ..media import gpu
         gpu.device()
         from ultralytics import YOLO
         model = YOLO(a.weights)

@@ -1,7 +1,7 @@
 """Stabilize clips (or trimmed ranges of them) with the Gyroflow CLI.
 
-    python gf_render.py OUT_DIR --list clips.txt --width 640 --height 360 --bitrate 3M
-    python gf_render.py OUT_DIR --ranges ranges.json --width 1920 --height 1080 --bitrate 20M
+    python -m embedia.media.gf_render OUT_DIR --list clips.txt --width 640 --height 360 --bitrate 3M
+    python -m embedia.media.gf_render OUT_DIR --ranges ranges.json --width 1920 --height 1080 --bitrate 20M
 
 clips.txt: one clip path per line -> <stem>_stabilized.mp4 (whole clip).
 ranges.json: {"<clip path>": [[start_ms, end_ms], ...], ...} -> <stem>_stabilized-001.mp4 ... per range.

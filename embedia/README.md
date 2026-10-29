@@ -6,21 +6,37 @@ vision-language model, speech with its words and voices. All of it stays in one 
 and is asked afterwards in words or by example, in seconds: "where is she in view while we go fast", "a jump
 into the water", "the person on this screenshot", "where somebody laughs".
 
-It knows nothing of editing. [montAIge](../README.md) cuts films to music from it; any other project can open
-the same folder.
+It knows nothing of what the index is for: cut films from it, find a person or a moment in words, or just see
+what happened in the footage and who was there.
 
-Its imports are relative: a copy under another name (`embedia_ics`, a repository of its own) runs as that name
-(`python -m embedia_ics ...`) and builds and reads the same index; each feature records the package that made it.
+It began as smart indexing of video, because CLIP alone is not enough: frame embeddings find a beach, not who
+was on it, what they did and said, or how the camera moved there. Comments that name `edit.py`, `montage.py` or
+"the montage" mean a program that cuts films from the features.
+
+```
+./              the index: index.py (layout, Python interface), read.py, run.py (the steps), timeline.py (the
+                database), paths.py (models/), __main__.py (the command line)
+media/          the files: MP4 boxes, DJI metadata, split recordings joined, Gyroflow's motion export and renders,
+                proxies, frames as arrays (pix.py), the GPU
+analyzers/      the steps' modules (python -m embedia.analyzers.people ...) and tools over their features:
+                exports, faces, smiles
+```
+
+A reader imports a module by its name alone, wherever it lives: `from embedia import pix, people`.
 
 ## Quick start
 
+Clone it and run it from the folder above (no installation). Its imports are relative, so the package is called
+by its folder's name: several checkouts side by side (`embedia`, `embedia_ics`) are the same embedia, and a
+reader picks the folder. Below, `embedia` stands for that name. One index, whichever checkout builds it; each feature records the folder that made it.
+
 ```bash
-pip install -e /path/to/montAIge                    # or run from the repository: python -m embedia ...
+git clone git@gitlab.ics.com:parkhipov/embedia.git
 export GYROFLOW=/path/to/Gyroflow.exe               # GoPro motion; stabilized proxies (stabilize = true)
 python -m embedia init trip/index --footage /path/to/footage [--camera carried] [--set captions=true]
 python -m embedia run trip/index                    # scan, proxies, features, timeline; skips what is done
 python -m embedia status trip/index
-python -m embedia search trip/index "a jump into the water"           # --by image | sound | caption | speech
+python -m embedia search trip/index "a jump into the water"       # --by image | sound | caption | speech
 python -m embedia sql trip/index "SELECT clip, t, speed FROM t WHERE people > 2 AND speed > 20"
 python -m embedia who trip/index marina=refs/marina.jpg kid=GH010051:12.5:0.3
 ```
@@ -35,8 +51,9 @@ ix.search('welding with sparks', by='image')  # [{clip, t0, t1, score}]
 ```
 
 Requirements: an NVIDIA GPU, Python 3.11+, PyTorch with CUDA, ultralytics, transformers, accelerate, PyAV,
-OpenCV, NumPy, SciPy, Pillow; Gyroflow 1.6.3; speech in a venv of its own (pyannote.audio 4 wants NumPy 2; see
-the main README). Model weights go to `models/` beside `embedia/` (found by walking up from the package).
+OpenCV, NumPy, SciPy, Pillow; Gyroflow 1.6.3; speech in a venv of its own (pyannote.audio 4 wants NumPy 2;
+`speech.py` says what it needs). Model weights go to a `models/` folder above the package (found by walking up
+from it), or to the folder EMBEDIA_MODELS names.
 
 ## What is indexed
 
@@ -67,7 +84,7 @@ count and how Gyroflow was called) and in `clips.frame`:
 
 | frame | the proxy | boxes are shares of | when |
 |---|---|---|---|
-| `stabilized` | Gyroflow's render of a clip with motion data, kept | the stabilized frame | `stabilize = true` (default with `fpv`; the montage sets it) |
+| `stabilized` | Gyroflow's render of a clip with motion data, kept | the stabilized frame | `stabilize = true` (default with `fpv`) |
 | `as-is` | the original scaled down, made while a step reads the picture and removed after the run | the original's frame | otherwise, and clips stabilized before |
 
 Everything that answers works without the proxies: SQL, `search`, the questions. A stabilized render is never
@@ -104,13 +121,13 @@ Rebuilt from the features after every run, except `features`, `questions`, `meta
 | `passes` | close passes (`fpv`): `clip`, `t`, `kind` (between legs, under, over, past on its left / right, close; lying), `size`, `name` (who was passed) |
 | `captions` | `clip`, `t0`, `t1`, `text`; `captions_fts` searches it: `WHERE captions_fts MATCH 'jump*'` |
 | `phrases` | speech: `clip`, `t0`, `t1`, `voice`, `sung`, `snr`, `level`, `text`; `phrases_fts` as above |
-| `features` | `clip`, `step`, `version`, `made`, `embedia`, `frame`: which step version and which embedia (package and version, `embedia_ics 0.1.0`; a bare version: `embedia`) made a clip's features, on which frame; a run warns of features another package made (its step versions are its own) |
+| `features` | `clip`, `step`, `version`, `made`, `embedia`, `frame`: which step version and which embedia (its folder and version, `embedia_ics 0.1.0`; a bare version: a folder named `embedia`) made a clip's features, on which frame; a run warns of features another package made (its step versions are its own) |
 | `questions` | `kind`, `name`, `input` (JSON), `made`, `embedia` |
 | `meta` | `key`, `value`: `embedia_package`, `embedia_version`, `embedia_code` (git commit, +dirty), `created`, `built` |
 
 ## Adding an analyzer
 
-A module that takes proxies (or originals) on its command line and writes `<proxy>_<feature>.npz` beside each,
-skipping what exists; then a `Step` line in `run.py`: its name, version, outputs, which clips, the `embedia.toml`
+A module in `analyzers/` that takes proxies (or originals) on its command line and writes `<proxy>_<feature>.npz`
+beside each, skipping what exists, and its name in `ANALYZERS` (`__init__.py`); then a `Step` line in `run.py`: its name, version, outputs, which clips, the `embedia.toml`
 key that turns it on. Raise the version when its output changes: the old features are made again. Before tuning
 a new detector, run it on a clip with the thing and one without, and compare the two numbers.

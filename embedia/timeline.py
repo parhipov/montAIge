@@ -1,7 +1,7 @@
 """One table of everything the features know, for questions across them: the index's embedia.sqlite.
 
-    python -m embedia.timeline INDEX                         build (embedia's run does it after the features)
-    python -m embedia.timeline INDEX --sql "SELECT ..."      ask; prints at most --limit rows (python -m embedia sql)
+    python -m embedia.timeline INDEX                     build (embedia's run does it after the features)
+    python -m embedia.timeline INDEX --sql "SELECT ..."  ask; prints at most --limit rows (python -m embedia sql)
 
 The features stay where they are (npz per render, the source); these tables are built from them, rebuilt in
 seconds, beside the index's own (features, questions), which a rebuild keeps. A question like "where is marina in view while we go fast with a beautiful view behind" is one query:
@@ -65,7 +65,7 @@ def activity_labels(renders, cache):
     """{render: (frames, label, p)} on the CLIP samples: from <render>_activities.npz where places.py activities
     ran (it carries the job's own --text activities: "welding with sparks" in a factory), else from the general
     list on the embeddings (places.py embed); {} without either."""
-    from . import places
+    from .analyzers import places
     out, todo = {}, []
     for r in renders:
         a = os.path.splitext(r)[0] + '_activities.npz'
@@ -98,7 +98,7 @@ TABLES = ('captions_fts', 'phrases_fts', 'clips', 't', 'people', 'labels', 'pass
 def build(ix, clip_cache=None):
     import datetime
     from . import read
-    from . import speech
+    from .analyzers import speech
     proxy, cache = ix.proxy_dir, ix.cache_dir
     pairs = ix.measured()                                        # the features, not the proxies: those may be gone
     names = sorted({n for _, r in pairs for n in subject_names(os.path.splitext(r)[0])})

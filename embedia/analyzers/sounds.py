@@ -1,7 +1,8 @@
 """The footage's own sound in words (CLAP, the audio twin of CLIP): laughter, a shout of joy, a splash.
 
-    python sounds.py embed --list originals.txt --proxy-dir DIR          -> DIR/<clip>_stabilized_clap.npz
-    python sounds.py search "people laughing" [...] --list originals.txt --proxy-dir DIR    the best moments
+    python -m embedia.analyzers.sounds embed --list originals.txt --proxy-dir DIR   -> <clip>_stabilized_clap.npz
+    python -m embedia.analyzers.sounds search "people laughing" [...] --list originals.txt --proxy-dir DIR
+                                                                                            the best moments
 
 Windows of WIN_S every HOP_S of the clip's sound (48 kHz mono), embedded by CLAP (laion/larger_clap_general,
 general sounds, not music; models/clap fills itself from Hugging Face). A sound in words is told from what else
@@ -15,14 +16,10 @@ read from a busy disk.
 """
 import argparse
 import os
-import sys
 
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import paths  # noqa: E402
+from .. import paths
 
 NAME = 'laion/larger_clap_general'
 SR, WIN_S, HOP_S, BATCH = 48000, 2.0, 1.0, 32
@@ -45,7 +42,7 @@ class Lazy:
         if self.parts is None:
             import torch  # noqa: F401
             from transformers import ClapModel, ClapProcessor
-            from . import gpu
+            from ..media import gpu
             dev = gpu.device()
             m = ClapModel.from_pretrained(NAME, cache_dir=self.cache).to(dev).eval()
             if dev != 'cpu':

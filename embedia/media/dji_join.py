@@ -1,6 +1,6 @@
 """Join DJI O4 Pro split recordings (the camera cuts a recording into ~4-minute files).
 
-    python dji_join.py FOLDER [--dry-run]          FOLDER and all its subfolders
+    python -m embedia.media.dji_join FOLDER [--dry-run]      FOLDER and all its subfolders
 
 Parts of one recording have consecutive numbers (..._0020_D, ..._0021_D, ...) and each starts where the
 previous one ended (the time in the file name plus the duration). They are joined by mp4_merge from

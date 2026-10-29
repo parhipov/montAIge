@@ -1,7 +1,8 @@
 """Where and how fast a GoPro clip was shot: the GPS in its GPMF track (GPS5, or GPS9 from HERO11 on).
 
-    python gps.py CLIP.MP4 [...]      one line per clip: fixes, the first and the middle point, altitude
-    python gps.py track --list originals.txt --proxy-dir DIR    -> DIR/<clip>_stabilized_gps.npz per clip
+    python -m embedia.analyzers.gps CLIP.MP4 [...]      one line per clip: fixes, the first and the middle
+                                                            point, altitude
+    python -m embedia.analyzers.gps track --list originals.txt --proxy-dir DIR    -> DIR/<clip>_stabilized_gps.npz per clip
 
 A place named from the picture is a guess (a turquoise river in a canyon read as the Sulak canyon; the GPS put
 it 30 km south, by the Irganay reservoir): check names against this before they go into captions or titles.
@@ -20,10 +21,7 @@ import sys
 
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from .mp4parse import open_mp4  # noqa: E402
+from ..media.mp4parse import open_mp4
 
 # climb: altitude smoothed over this before the derivative (GPS altitude wobbles by metres from fix to fix)
 CLIMB_S = 4.0

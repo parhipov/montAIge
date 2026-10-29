@@ -1,6 +1,6 @@
 """DJI clip metadata for the montage: the camera's orientation at every video frame, from the `djmd` track.
 
-    python djimeta.py CLIP.MP4          prints frames, quaternion samples, the first frame's orientation
+    python -m embedia.media.djimeta CLIP.MP4     prints frames, quaternion samples, the first frame's orientation
 
 The `djmd` track holds one protobuf message per video frame; its IMU part carries the fused attitude
 (several quaternions per frame interval). They are turned into Gyroflow's camera frame the way
@@ -9,15 +9,11 @@ Gyroflow does. A frame's orientation is the middle sample of its interval; frame
 interpolated. Self-contained: mp4parse.py and pb.py are generic readers.
 """
 import math
-import os
 import struct
 import sys
 
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 from . import pb
 from .mp4parse import open_mp4
 

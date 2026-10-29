@@ -243,7 +243,8 @@ anything runs: read that line (a TOML comment once swallowed half an args line).
 
 ## Other tools
 
-embedia's modules run as `$PY -m embedia.<module>` (or `$PY embedia/<module>.py`), the index's own commands as
+embedia's modules run as `$PY -m embedia.analyzers.<module>` (the steps: people, places, captions...) or
+`$PY -m embedia.media.<module>` (gf_render, proxy, dji_join, djimeta), the index's own commands as
 `$PY -m embedia <command> out/<job>/index`: `status` (steps done per clip, questions asked), `schema` (the
 tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
 --by image|sound|caption|speech`, `who NAME=REF ...`, `subject NAME --text ...`, `beauty --text ... --plain ...`,
@@ -291,7 +292,7 @@ tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
   `features`, finals cut it directly. A clip with no motion track under any other name is left out by the scan:
   give a phone or camera clip a `_stabilized` name to take it in.
 - `tools/lut_clips.py PAIRS.json --lut FILE.cube [--wait]`: whole clips graded on the GPU at their own size, 10-bit in
-  and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `embedia/gf_render.py
+  and out (a delivery of stabilized clips with no edit: `dji_join.py` for split recordings, then `embedia.media.gf_render
   --codec hevc10 --width W --height H --bitrate 120M` at the source size, given, not left to Gyroflow, then this;
   `--wait` grades each clip as Gyroflow finishes it; the clip's sound comes through).
 - `tools/flow_gyro.py CLIP [...]`: a camera with no gyro on a tripod, zoom lens included (a Sony a6400): the picture's

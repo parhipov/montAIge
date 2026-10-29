@@ -1,15 +1,16 @@
 """People in the picture, person by person: pose (YOLOv8-pose), who the pilot is, close passes.
 
-    python people.py detect --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_people.npz
-    python people.py track  --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_ptrack.npz, _tid.npy
-    python people.py embed  RENDER.mp4 [...]       CLIP of each person row -> <render>_pclip.npy, _pclipw.npy (wide)
-    python people.py pilot  RENDER.mp4 [...] [--sheet check.jpg]                    -> <render>_pilot.npy
-    python people.py passes --weights ... RENDER.mp4 [...]                           -> <render>_passes.npz
-    python people.py subject RENDER.mp4 [...] --text "a woman pushing a baby stroller" [--text ...] [--not ...] [--tag NAME]
-                    [--sheet check.jpg]
-    python people.py who RENDER.mp4 [...] --ref NAME=IMAGE.jpg [--ref NAME=IMAGE2.jpg ...] [--sheet check.jpg]
-    python people.py split RENDER.mp4 [...] --tag NAME --k 3 --sheet looks.jpg     then  --keep 0,2
-    python people.py summary RENDER.mp4 [...]
+    python -m embedia.analyzers.people COMMAND ...
+        detect --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_people.npz
+        track  --weights models/yolo/yolov8s-pose.pt RENDER.mp4 [...]   -> <render>_ptrack.npz, _tid.npy
+        embed  RENDER.mp4 [...]       CLIP of each person row -> <render>_pclip.npy, _pclipw.npy (wide)
+        pilot  RENDER.mp4 [...] [--sheet check.jpg]                    -> <render>_pilot.npy
+        passes --weights ... RENDER.mp4 [...]                           -> <render>_passes.npz
+        subject RENDER.mp4 [...] --text "a woman pushing a baby stroller" [--text ...] [--not ...] [--tag NAME]
+                [--sheet check.jpg]
+        who RENDER.mp4 [...] --ref NAME=IMAGE.jpg [--ref NAME=IMAGE2.jpg ...] [--sheet check.jpg]
+        split RENDER.mp4 [...] --tag NAME --k 3 --sheet looks.jpg     then  --keep 0,2
+        summary RENDER.mp4 [...]
 
 detect   2 samples a second; per person: box, 17 keypoints, a colour print of the clothes (top and
          bottom half: hue histogram weighted by saturation, value histogram, mean saturation).
@@ -55,18 +56,14 @@ Raw boxes and keypoints are never printed.
 """
 import argparse
 import os
-import sys
 import time
 
 import av
 import cv2
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import gpu
-from . import pix
+from ..media import gpu
+from ..media import pix
 
 NOSE, LEYE, REYE, LEAR, REAR, LSH, RSH, LEL, REL, LWR, RWR, LHIP, RHIP, LKN, RKN, LAN, RAN = range(17)
 KP_OK = 0.35
@@ -1368,7 +1365,7 @@ def main():
     ap.add_argument('--sim', type=float, default=WHO_SIM, help='who: CLIP cosine to the references')
     ap.add_argument('--originals', default=None, help='who: clip list, for references given as CLIP:SECONDS:X')
     ap.add_argument('--ref-dir', default='refs', help='who: where references cut from the clips are saved')
-    from . import paths
+    from .. import paths
     ap.add_argument('--pose', default=os.path.join(paths.MODELS, 'yolo', 'yolov8s-pose.pt'),
                     help='who: the person detector for CLIP:SECONDS:X')
     ap.add_argument('--margin', type=float, default=WHO_MARGIN, help='who: lead over the next person')

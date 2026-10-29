@@ -1,7 +1,7 @@
 """How beautiful the view is, per half second, with beauty in the job's own words: an option for edits that want
 beautiful views (edit.py --beauty W; off by default). Mountains for one job, a beach for another.
 
-    python beauty.py RENDER.mp4 [...] --text "mountains" --text "a canyon with a river" [...]
+    python -m embedia.analyzers.beauty RENDER.mp4 [...] --text "mountains" --text "a canyon with a river"
                      [--plain "snow up close" ...] [--clip-cache models/clip] [--sheet beauty.jpg]
                                                                           -> <render>_beauty.npz next to each
 
@@ -18,16 +18,11 @@ views and the best stretches; --sheet: the best and the worst half seconds of al
 """
 import argparse
 import os
-import sys
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(HERE))
-    __package__ = os.path.basename(HERE)
-from . import paths  # noqa: E402
-from . import places  # noqa: E402
+from .. import paths
+from . import places
 
 AES_HEAD = os.path.join(paths.MODELS, 'aesthetic', 'sa_0_4_vit_b_32_linear.pth')
 MUNDANE = ['a parking lot', 'a dirt yard', 'grass up close', 'the ground up close', 'a road with cars',

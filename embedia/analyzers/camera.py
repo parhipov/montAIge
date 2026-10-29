@@ -1,7 +1,7 @@
 """Flown or carried, per clip, from the camera's own accelerometer (a GoPro's GPMF ACCL, ~200 a second).
 
-    python camera.py CLIP [...]                      one line per clip
-    python camera.py --list originals.txt --out cameras.json [--carried GX* DJI_2000*]
+    python -m embedia.analyzers.camera CLIP [...]                      one line per clip
+    python -m embedia.analyzers.camera --list originals.txt --out cameras.json [--carried GX* DJI_2000*]
 
 A drone's thrust shakes the camera: the acceleration under 5 Hz moved by 1.6-5.4 m/s2 RMS over every flight of
 over 15 s (63 GoPro clips of six shoots: FPV over towns, forests, water, a canyon), and by 0.2-1.1 on a skier's
@@ -15,15 +15,11 @@ import argparse
 import fnmatch
 import json
 import os
-import sys
 
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import gps  # noqa: E402
+from . import gps
 
 FLOWN_LF = 1.35         # m/s2 RMS of the acceleration magnitude under 5 Hz: over it, flown
 MIN_S = 4.0

@@ -1,6 +1,6 @@
 """Smiles at the camera: the local vision-language model of captions.py asked about candidate heads only.
 
-    python smiles.py RENDER.mp4 [...] [--min-area 0.06] [--step 1.0] [--top 20] [--sheet OUT.jpg]
+    python -m embedia.analyzers.smiles RENDER.mp4 [...] [--min-area 0.06] [--step 1.0] [--top 20] [--sheet OUT.jpg]
         -> <render>_smiles.npz (frame, head square, asked, answer, smile) next to each; prints the longest
            stretches of smiles as CLIP:START-END, ready for edit.py --must
 
@@ -23,18 +23,13 @@ the camera; sharpness 16-230 against 240-3100 for faces), heads of 32-36 px, and
 """
 import argparse
 import os
-import sys
 import time
 
 import av
 import cv2
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(HERE))
-    __package__ = os.path.basename(HERE)
-from . import pix  # noqa: E402
+from ..media import pix
 
 PROMPT = 'Is this person smiling? Answer yes or no.'
 MIN_AREA, STEP_S, BATCH, MAX_NEW = 0.06, 1.0, 8, 16

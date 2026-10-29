@@ -1,20 +1,20 @@
-"""embedia from the command line (run from the repository, or anywhere with embedia installed):
+"""embedia from the command line, run from the folder above it (`embedia` stands for the name of its folder):
 
     python -m embedia init INDEX --footage DIR [DIR ...] [--camera drone|carried|auto] [--set KEY=VALUE ...]
-    python -m embedia run INDEX [--join]            scan, proxies, features, questions again, timeline
-    python -m embedia scan INDEX [--join]           (--join: split DJI recordings are joined; ask the owner first)
-    python -m embedia proxies INDEX                 every clip's proxy (scaled ones go again after a run without
+    python -m embedia run INDEX [--join]        scan, proxies, features, questions again, timeline
+    python -m embedia scan INDEX [--join]       (--join: split DJI recordings are joined; ask the owner first)
+    python -m embedia proxies INDEX             every clip's proxy (scaled ones go again after a run without
                                                     stabilize = true)
     python -m embedia analyze INDEX [--only STEP] [--redo STEP]     features, questions again, timeline
-    python -m embedia status INDEX                  clips, which steps are done, the questions asked
-    python -m embedia schema INDEX                  the database's tables, columns, rows (README: what they mean)
+    python -m embedia status INDEX              clips, which steps are done, the questions asked
+    python -m embedia schema INDEX              the database's tables, columns, rows (README: what they mean)
     python -m embedia sql INDEX "SELECT ..." [--limit N]
     python -m embedia search INDEX "words" [--by image|sound|caption|speech] [--top N]
     python -m embedia who INDEX NAME=SCREENSHOT [NAME=CLIP:SECONDS:X ...]   (_NAME: somebody else)
     python -m embedia subject INDEX NAME --text "a woman pushing a pram" [--not ...]
     python -m embedia beauty INDEX --text "mountains" [--plain "snow up close" ...]
-    python -m embedia activities INDEX [--text "welding with sparks" ...] [--only]   (--only: these replace the
-                                                                                      general list)
+    python -m embedia activities INDEX [--text "welding with sparks" ...] [--only]   (--only: these replace
+                                                                                          the general list)
     python -m embedia questions INDEX
 
 INDEX is a folder with embedia.toml (or a job folder holding index/). A question is kept with its input and asked
@@ -69,8 +69,7 @@ def status(ix):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog=f'python -m {__package__}',          # a copy under another name: its own
-                                 description=__doc__.replace('python -m embedia ', f'python -m {__package__} '),
+    ap = argparse.ArgumentParser(prog=f'python -m {__package__}', description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init')

@@ -1,6 +1,6 @@
 """The owner's own exports in a footage folder, found in the originals: often the best is already picked there.
 
-    python exports.py FOLDER [...] --originals out/JOB/index/originals.txt --proxy-dir out/JOB/index/proxy
+    python -m embedia.analyzers.exports FOLDER [...] --originals out/JOB/index/originals.txt --proxy-dir out/JOB/index/proxy
 
 Every video in the folders that is not one of the originals (an old Gyroflow export, a named edit; not
 the goggle recordings DJIG*, not the parts _* of a joined recording) is cut into pieces at its cuts, and
@@ -12,15 +12,11 @@ next best place.
 """
 import argparse
 import os
-import sys
 
 import av
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import pix
+from ..media import pix
 
 HZ = 10.0
 CUT_JUMP = 3.0      # a cut: thumbnail change this many times the export's median change, and over 12 (0-255)

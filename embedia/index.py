@@ -42,7 +42,7 @@ import tomllib
 import numpy as np
 
 VERSION = '0.1.0'       # embedia's own (pyproject.toml's too)
-PACKAGE = __package__   # embedia, or a copy of it under another name (embedia_ics): one index, either of them
+PACKAGE = __package__   # the name of embedia's folder (a clone named embedia_ics): one index, whatever the name
 MADE_BY = f'{PACKAGE} {VERSION}'                 # in `meta` and on every feature and question
 CONFIG = 'embedia.toml'
 DB = 'embedia.sqlite'
@@ -315,20 +315,21 @@ class Index:
         renders = [r for _, r in pairs]
         name = {r: self.stem(s) for s, r in pairs}
         if by == 'image':
-            from . import paths, places
+            from . import paths
+            from .analyzers import places
             hit = places.find(renders, text, clip_cache or os.path.join(paths.MODELS, 'clip'))
             return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(hit[3]))]
         if by == 'sound':
-            from . import sounds
+            from .analyzers import sounds
             half = sounds.PIECE_S / 2
             return [dict(clip=name[r], t0=max(t - half, 0.0), t1=t + half, score=float(p))
                     for p, r, t in sounds.moments(pairs, text, top=top)]
         if by == 'caption':
-            from . import captions
+            from .analyzers import captions
             hit = captions.find(renders, text)
-            return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(len(hit[3])))]
+            return [] if hit is None else [dict(clip=name[hit[0]], t0=hit[1], t1=hit[2], score=float(hit[3]))]
         if by == 'speech':
-            from . import speech
+            from .analyzers import speech
             return [dict(clip=name[r], t0=t0, t1=t1, score=float(sh), text=tx, voice=v)
                     for r, t0, t1, tx, v, sh in speech.find(renders, text, top=top)]
         raise ValueError(f'by={by!r}: image, sound, caption or speech')

@@ -1,9 +1,11 @@
 """What happens in the footage, in words: a local vision-language model describes every CHUNK_S seconds of a
 render as a short video clip (FPS_IN frames a second, CHUNK_W px wide).
 
-    python captions.py RENDER.mp4 [...] [--chunk 3] [--batch 6]        -> <render>_captions.npz (frame, text)
-    python captions.py --search "jumping into the water" RENDER.mp4 [...]    the stretches whose captions say so
-    python captions.py --ask "What is the person doing?" IMAGE.jpg [...]      one question about pictures (review.py)
+    python -m embedia.analyzers.captions RENDER.mp4 [...] [--chunk 3] [--batch 6]   -> <render>_captions.npz
+    python -m embedia.analyzers.captions --search "jumping into the water" RENDER.mp4 [...]   the stretches
+                                                                                   whose captions say so
+    python -m embedia.analyzers.captions --ask "What is the person doing?" IMAGE.jpg [...]   one question about
+                                                                                   pictures (review.py)
 
 The model (MODEL, Qwen3-VL 2B, from Hugging Face into models/vlm; ~4 GB of GPU memory, 0.5 s a chunk on an RTX
 3050 in batches of 6) answers one question per chunk in a sentence: who is there and what they are doing, or what
@@ -20,18 +22,13 @@ has to match. Stretches: matching chunks with gaps of one chunk bridged, the lon
 import argparse
 import os
 import re
-import sys
 import time
 
 import av
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(HERE))
-    __package__ = os.path.basename(HERE)
-from . import paths  # noqa: E402
-from . import pix  # noqa: E402
+from .. import paths
+from ..media import pix
 
 MODEL = 'Qwen/Qwen3-VL-2B-Instruct'
 CACHE = os.path.join(paths.MODELS, 'vlm')
@@ -54,7 +51,7 @@ class VLM:
         if self.parts is None:
             import torch
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
-            from . import gpu
+            from ..media import gpu
             dev = gpu.device()
             model = Qwen3VLForConditionalGeneration.from_pretrained(self.name, cache_dir=self.cache, dtype=torch.float16,
                                                                     device_map=dev, attn_implementation='sdpa').eval()

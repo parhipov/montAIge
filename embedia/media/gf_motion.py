@@ -1,7 +1,7 @@
 """Camera motion of clips our parser cannot read (GoPro), exported by the Gyroflow CLI.
 
-    python gf_motion.py CACHE_DIR CLIP [CLIP ...]   ->  CACHE_DIR/<stem>_gyroflow_camera.json
-    python gf_motion.py CACHE_DIR --list clips.txt  (one path per line; paths with spaces are safe here)
+    python -m embedia.media.gf_motion CACHE_DIR CLIP [CLIP ...]   ->  CACHE_DIR/<stem>_gyroflow_camera.json
+    python -m embedia.media.gf_motion CACHE_DIR --list clips.txt  (one path per line; spaces are safe here)
 
 Gyroflow cannot write into a path with spaces reliably, so it writes to the temp folder first.
 """

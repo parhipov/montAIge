@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# dji_join.py downloads it on first use
+mp4_merge.exe

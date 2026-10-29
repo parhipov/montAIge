@@ -1,6 +1,6 @@
 """Faces: tell apart people dressed alike (two girls in the same T-shirt), from the original clips.
 
-    GPU_PY faces.py RENDER.mp4 [...] --originals originals.txt --check kid_pink [--also kid_pink_not]
+    python -m embedia.analyzers.faces RENDER.mp4 [...] --originals originals.txt --check kid_pink [--also kid_pink_not]
         --ref kid_pink=CLIP:SECONDS:X [--ref _ponytail=CLIP:SECONDS:X ...] [--sheet faces.jpg]
 
 The small renders are too small for faces (eyes ~3 px apart at 640 px), so at every sample where a
@@ -23,21 +23,16 @@ reference it resembles most (SFace cosine >= --sim and ahead by --margin). Then 
 import argparse
 import glob
 import os
-import sys
 
 import av
 import cv2
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import gpu
-from . import paths
-from . import pix
+from .. import paths
+from ..media import gpu
+from ..media import pix
 from . import people as pp
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 SFACE = os.path.join(paths.MODELS, 'faces', 'face_recognition_sface_2021dec.onnx')
 POSE = os.path.join(paths.MODELS, 'yolo', 'yolov8s-pose.pt')
 # where the left eye, the right eye and the nose sit in a 112x112 ArcFace face

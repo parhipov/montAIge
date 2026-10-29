@@ -1,6 +1,6 @@
 """Small proxies of clips stabilized elsewhere (no motion data left for Gyroflow): frame for frame, scaled.
 
-    python proxy.py OUT_DIR --list clips.txt --width 640 --height 360
+    python -m embedia.media.proxy OUT_DIR --list clips.txt --width 640 --height 360
 
 clips.txt: one path per line -> OUT_DIR/<stem>_stabilized.mp4, the same name a Gyroflow proxy gets (a clip
 named GH010397_stabilized.mp4 gives GH010397_stabilized_stabilized.mp4). Written to .tmp first, so a broken
@@ -10,14 +10,10 @@ frame k of the clip (final.py cuts the clip itself by these numbers); the frames
 """
 import argparse
 import os
-import sys
 import time
 
 import av
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 from . import pix
 
 ap = argparse.ArgumentParser()

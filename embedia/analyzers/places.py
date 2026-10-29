@@ -1,12 +1,13 @@
 """Where the camera is, in words: CLIP on whole frames, searched by text, and routes through places.
 
-    python places.py embed RENDER.mp4 [...] --clip-cache models/clip            -> <render>_clip.npz
-    python places.py search RENDER.mp4 [...] --clip-cache models/clip --text "a staircase" [--text ...]
-                    [--not "a tennis court" ...] [--top 8] [--sheet out.jpg]
-    python places.py route RENDER.mp4 [...] --clip-cache models/clip --text "a lobby" --text "a staircase"
-                    --text "a tennis court" [--not ...] [--within 20] [--sheet out.jpg]
-    python places.py locations RENDER.mp4 [...] [--sheet locations.jpg]
-    python places.py activities RENDER.mp4 [...] [--text "an extra activity" ...] [--only] [--sheet activities.jpg]
+    python -m embedia.analyzers.places COMMAND ...
+        embed RENDER.mp4 [...] --clip-cache models/clip            -> <render>_clip.npz
+        search RENDER.mp4 [...] --clip-cache models/clip --text "a staircase" [--text ...]
+                [--not "a tennis court" ...] [--top 8] [--sheet out.jpg]
+        route RENDER.mp4 [...] --clip-cache models/clip --text "a lobby" --text "a staircase"
+                --text "a tennis court" [--not ...] [--within 20] [--sheet out.jpg]
+        locations RENDER.mp4 [...] [--sheet locations.jpg]
+        activities RENDER.mp4 [...] [--text "an extra activity" ...] [--only] [--sheet activities.jpg]
 
 embed   Every half second, the CLIP ViT-B/32 embedding of the whole frame (cached; `search` and `route`
         compute it when missing).
@@ -31,17 +32,13 @@ activities What happens in the footage, from a general list (ACTIVITIES, plus --
 """
 import argparse
 import os
-import sys
 
 import av
 import cv2
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import paths
-from . import pix
+from .. import paths
+from ..media import pix
 
 EVERY_S = 0.5
 TEXT_CACHE = os.path.join(paths.MODELS, 'clip', 'texts.npz')     # text embeddings computed so far
@@ -104,7 +101,7 @@ class Lazy:
         if self.parts is None:
             import torch  # noqa: F401
             from transformers import CLIPModel, CLIPProcessor
-            from . import gpu
+            from ..media import gpu
             dev = gpu.device()
             name = 'openai/clip-vit-base-patch32'
             self.parts = (CLIPModel.from_pretrained(name, cache_dir=self.cache).to(dev).eval(),

@@ -52,8 +52,9 @@ import numpy as np
 from scipy.ndimage import binary_dilation, uniform_filter1d
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repository (run as a file)
-from embedia import pix  # noqa: E402
-from embedia.vis_motion import track  # noqa: E402
+from embedia import pix, vis_motion  # noqa: E402
+
+track = vis_motion.track
 
 MEAS_W = 960            # the picture is measured this wide
 RANSAC_PX = 1.0         # inlier distance of the similarity, px at MEAS_W

@@ -1,7 +1,7 @@
 """Footage in, an index out: scan -> proxies -> features -> questions asked again -> timeline. Every step skips
 what is done.
 
-    python -m embedia run INDEX                  every step (INDEX: a folder with embedia.toml)
+    python -m embedia run INDEX              every step (INDEX: a folder with embedia.toml)
     python -m embedia analyze INDEX [--only STEP] [--redo STEP]
 
 embedia.toml (written by hand, by `python -m embedia init`, or by the montage from its job file):
@@ -100,8 +100,11 @@ def short_cmd(cmd):
 
 
 def command(module, args, py=None):
-    """`python -m <this package>.<module> args`, from the repository (another Python, e.g. the speech venv, too)."""
-    return [py or sys.executable, '-m', f'{__package__}.{module}'] + [str(a) for a in args]
+    """`python -m <this package>.<media|analyzers>.<module> args`, from the repository (another Python, e.g. the
+    speech venv, too)."""
+    from . import MEDIA
+    group = 'media' if module in MEDIA else 'analyzers'
+    return [py or sys.executable, '-m', f'{__package__}.{group}.{module}'] + [str(a) for a in args]
 
 
 def env():
@@ -129,7 +132,7 @@ def run(module, args, log=None, py=None):
 
 # ------------------------------------------------------------------------------------------- what a clip is
 def has_track(path, fourcc):
-    from .mp4parse import open_mp4
+    from .media.mp4parse import open_mp4
     try:
         f, _, _, tracks = open_mp4(path)
         f.close()
@@ -147,7 +150,7 @@ def gyroflow_motion(path, cache):
         return True
     if not has_track(path, b'djmd'):
         return True
-    from . import djimeta
+    from .media import djimeta
     try:
         djimeta.frame_quats(path)
     except SystemExit:
@@ -230,7 +233,7 @@ def has_picture(path):
 
 
 def scan(ix, join=False):
-    from . import dji_join
+    from .media import dji_join
     footage = ix.cfg.get('footage') or []
     if not footage:
         raise SystemExit(f'{ix.root}: no footage in embedia.toml')
@@ -615,7 +618,7 @@ def features(ix, only=None, redo=()):
         if not todo:
             continue
         if not ran:
-            from . import gpu
+            from .media import gpu
             gpu.device()
             ran = True
         on = ix.made_on(step.name)
@@ -725,7 +728,7 @@ def ask(ix, kind, inp, name='', force=False):
             for f in (files(ix, old['input'], name) if old else []):
                 if ix.has(c, f):
                     os.remove(ix.path(c, f))
-    from . import gpu
+    from .media import gpu
     gpu.device()
     args = cmd(ix, inp, name)
     if run(module, args, log_of(ix)):

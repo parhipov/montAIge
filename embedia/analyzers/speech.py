@@ -1,8 +1,10 @@
 """What people say in the footage and who says it: speech in words (Whisper) and voices told apart (pyannote).
 
-    models/venvs/speech/Scripts/python speech.py run --list originals.txt --proxy-dir DIR --out out/JOB [--language ru]
-    python speech.py search "words" [...] --list originals.txt --proxy-dir DIR     the phrases that say it
-    python speech.py text --list originals.txt --proxy-dir DIR                     the whole transcript
+    models/venvs/speech/Scripts/python -m embedia.analyzers.speech run --list originals.txt --proxy-dir DIR
+                                                                         --out out/JOB [--language ru]
+    python -m embedia.analyzers.speech search "words" [...] --list originals.txt --proxy-dir DIR
+                                                                         the phrases that say it
+    python -m embedia.analyzers.speech text --list originals.txt --proxy-dir DIR     the whole transcript
 
 Per clip, cached in <render>_speech.json: pyannote's speaker-diarization-community-1 (models/diarization:
 segmentation, WeSpeaker embeddings, VBx clustering) says who speaks when in the clip; Whisper (large-v3-turbo,
@@ -32,10 +34,7 @@ import wave
 
 import numpy as np
 
-if not __package__:                               # run as a file: the package of its folder (PEP 366)
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    __package__ = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
-from . import paths  # noqa: E402
+from .. import paths
 
 SR = 16000                                                      # what pyannote and Whisper run at
 DIARIZATION = os.path.join(paths.MODELS, 'diarization', 'speaker-diarization-community-1')
@@ -271,7 +270,7 @@ class Models:
 
     def __call__(self, diarize=False, asr=False, clap=False):
         import torch
-        from . import gpu
+        from ..media import gpu
         dev = gpu.device()
         if diarize and self.pipe is None:
             from pyannote.audio import Pipeline

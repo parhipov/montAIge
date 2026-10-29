@@ -1,5 +1,6 @@
-"""Where the toolset's inputs are: the first `models/` folder up from the package, so a job's snapshot of the code
-(out/<job>/embedia, out/<job>/montaige) finds them as well as the repository does."""
+"""Where the toolset's inputs are: the folder EMBEDIA_MODELS names (models shared with another project), else the
+first `models/` folder up from the package, so a job's snapshot of the code finds them as well as the repository
+does."""
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +12,7 @@ def _up(name):
         if os.path.isdir(os.path.join(d, name)):
             return os.path.join(d, name)
         if os.path.dirname(d) == d:
-            raise SystemExit(f'no {name}/ folder above {HERE}')
+            raise SystemExit(f'no {name}/ folder above {HERE}: set EMBEDIA_MODELS')
         d = os.path.dirname(d)
 
 
@@ -26,5 +27,5 @@ def expand(args):
     return sorted(out.values())
 
 
-MODELS = _up('models')
-ROOT = os.path.dirname(MODELS)          # ai_montage/
+MODELS = os.path.abspath(os.environ['EMBEDIA_MODELS']) if os.environ.get('EMBEDIA_MODELS') else _up('models')
+ROOT = os.path.dirname(MODELS)          # the folder holding models/: where the steps run
