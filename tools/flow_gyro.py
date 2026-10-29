@@ -24,6 +24,9 @@ anywhere else, the scale taken about the image centre: the stabilization goes on
 panning while zooming; a clean zoom: +4, +13): one fitted for the clip and taken out would add a pan to every zoom.
 --zoom-still: a zero gyro during zooms instead (Gyroflow does nothing there).
 
+A weak stretch (no fit, or few tracks agreeing: frames smeared by a jerk) is measured across, from the frame before
+to the frame after, and the difference spread over its weak pairs (bridge); --no-bridge: as measured pair by pair.
+
 No rolling shutter correction (the project's frame_readout_time 0). On the a6400 at 4K 25p it is there and
 measurable (the shear and stretch of a frame pair against the change of its shift, corr +0.7-0.8, 24-39 ms, rows top
 to bottom), but on a tripod the shake changes by 1-2 px a frame: about 1 px between the top and the bottom of the
@@ -59,6 +62,8 @@ ZOOM_RATE, ZOOM_WIN, ZOOM_PAD = 0.002, 5, 3   # |log scale| a frame (ZOOM_WIN me
 F0_MM, SENSOR_MM = 16.0, 23.5                 # f0: the kit lens wide, on APS-C (a6400 4K reads the full width)
 HP_S = 1.0              # --check: the shake is what a HP_S moving mean takes away
 UP = 8                  # gyro samples a frame (200 Hz at 25 fps)
+WEAK_INL = 0.4          # a pair with fewer tracks agreeing (or no fit) is weak: measured across instead (bridge)
+BRIDGE_INL, BRIDGE_PAD = 0.2, 2               # a measurement across holds from this share; ends moved out up to this
 
 
 def similarity(a, b, cen):
@@ -97,6 +102,70 @@ def measure(path, width=MEAS_W, start=0.0):
     sc = W / width
     return dict(s=r[:, 0], th=r[:, 1], tx=r[:, 2] * sc, ty=r[:, 3] * sc, inl=r[:, 4], npts=r[:, 5],
                 fps=fps, W=W, H=H)
+
+
+def frames_at(path, ks, width=MEAS_W):
+    """Grey frames of a video by number, MEAS_W wide -> {k: array}."""
+    out = {}
+    with av.open(path) as c:
+        st = c.streams.video[0]
+        fps = float(st.average_rate)
+        W, H = st.codec_context.width, st.codec_context.height
+        h = int(round(H * width / W / 2)) * 2
+        c.seek(max(int((min(ks) / fps - 1.0) / st.time_base), 0), stream=st, backward=True)
+        for fr in c.decode(st):
+            k = int(round(float(fr.pts * st.time_base) * fps))
+            if k in ks:
+                out[k] = pix.ndarray(fr, format='gray', width=width, height=h)
+            if k >= max(ks):
+                break
+    return out
+
+
+def bridge(clip, m):
+    """Weak stretches (no fit, or under WEAK_INL of the tracks agreeing: a frame smeared by a jerk at a long
+    exposure) measured across: from the frame before to the frame after (BRIDGE_PAD more on each side when the ends
+    do not hold), the tracks started where the measured shifts put them; the difference between that and the sum of
+    the stretch's good pairs spread evenly over its weak ones. A jerk at C0028 1336.4 s (a6400, 1/25 s): one frame
+    with no fit, three at 19-23 %; 244 px measured pair by pair, 355 across, and Gyroflow left the 110 as a 61 px jump
+    (1080p) in two frames. -> new tx, ty, th; lines to print."""
+    tx, ty, th = (np.nan_to_num(m[k]).copy() for k in ('tx', 'ty', 'th'))
+    weak = (m['inl'] < WEAK_INL) | np.isnan(m['s'])
+    weak[0] = False
+    edges = np.flatnonzero(np.diff(np.r_[0, weak.astype(int), 0]))
+    fps, W, n = float(m['fps']), int(m['W']), len(tx)
+    sc = W / MEAS_W
+    lines = []
+    for i, j in zip(edges[::2], edges[1::2] - 1):            # weak pairs i..j: frames i-1 .. j
+        best = None
+        for pad in range(BRIDGE_PAD + 1):
+            a, b = max(i - 1 - pad, 0), min(j + pad, n - 1)
+            f = frames_at(clip, {a, b})
+            if a not in f or b not in f:
+                continue
+            h = f[a].shape[0]
+            cen = np.array([(MEAS_W - 1) / 2, (h - 1) / 2])
+            d = np.array([tx[a + 1:b + 1].sum(), ty[a + 1:b + 1].sum()]) / sc
+            for guess in (lambda p, d=d: p + d, None):
+                r = similarity(*track(f[a], f[b], guess, levels=4), cen)
+                if np.isfinite(r[0]) and r[4] >= BRIDGE_INL and (best is None or r[4] > best[1][4]):
+                    best = ((a, b), r)
+            if best is not None and best[1][4] >= 2 * BRIDGE_INL:
+                break
+        if best is None:
+            lines.append(f'    {i / fps:8.2f}-{j / fps:8.2f} s: not measured across, left as it was')
+            continue
+        (a, b), r = best
+        w = np.arange(a + 1, b + 1)
+        wk = w[weak[w]]
+        good = w[~weak[w]]
+        before = (tx[w].sum(), ty[w].sum())
+        for v, total in ((tx, r[2] * sc), (ty, r[3] * sc), (th, r[1])):
+            v[wk] = (total - v[good].sum()) / len(wk)
+        lines.append(f'    {i / fps:8.2f}-{j / fps:8.2f} s ({len(wk)} weak of {len(w)} pairs): {before[0]:+.0f}, '
+                     f'{before[1]:+.0f} px pair by pair -> {tx[w].sum():+.0f}, {ty[w].sum():+.0f} across '
+                     f'({r[4] * 100:.0f} % of {r[5]:.0f} tracks)')
+    return tx, ty, th, lines
 
 
 def zooms(z, fps):
@@ -223,6 +292,10 @@ def run(clip, a):
     zoom, spans = zooms(z, fps)
     t = np.column_stack([np.nan_to_num(m['tx']), np.nan_to_num(m['ty'])])
     th = np.nan_to_num(m['th'])
+    bridged = []
+    if not a.no_bridge:
+        tx, ty, th, bridged = bridge(clip, m)
+        t = np.column_stack([tx, ty])
     if a.zoom_still:
         t[zoom], th[zoom] = 0.0, 0.0
     f0 = a.f0 or F0_MM / SENSOR_MM * W
@@ -255,6 +328,9 @@ def run(clip, a):
         if len(worst) == 3:
             break
     print('  shakiest 10 s: ' + ', '.join(f'{k / fps - 5:.0f}-{k / fps + 5:.0f} s ({e[k]:.1f} px)' for k in worst))
+    if bridged:
+        print(f'  weak stretches measured across ({len(bridged)}):')
+        print('\n'.join(bridged))
 
 
 def check(clip, a):
@@ -286,6 +362,7 @@ def main():
     ap.add_argument('clips', nargs='+')
     ap.add_argument('--f0', type=float, default=None, help='the profile focal length, px (default: 16 mm on APS-C)')
     ap.add_argument('--zoom-still', action='store_true', help='a zero gyro during zooms')
+    ap.add_argument('--no-bridge', action='store_true', help='weak stretches as measured pair by pair')
     ap.add_argument('--list', type=int, default=12, help='zoom stretches printed')
     ap.add_argument('--check', default=None, help='a render of the clip: the shake it has left, per axis')
     ap.add_argument('--from', dest='start', type=float, default=0.0, help='--check: the render starts here, s')
