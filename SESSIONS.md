@@ -16,7 +16,8 @@ Not in the middle of tuning: while the owner comments preview after preview, the
 
 ## How
 
-1. The session writes `out/<job>/handoff.md` (it costs a page of output, cents):
+1. The session asks the owner, in one line, at such a point: "a new session from here?" A no costs nothing;
+   on a yes it writes `out/<job>/handoff.md` (a page of output):
    - **Accepted**: which preview, the owner's words, the exact commands and files that made it (EDL, options,
      LUTs, scripts in the job folder).
    - **Running / to do**: background jobs with their command lines and logs, the next steps in order, what to check
