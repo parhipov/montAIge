@@ -86,7 +86,10 @@ fetches it).
 - A new job in a new session: every request re-reads the whole conversation, and a job done late in a long
   session cost 3.5 times as many tokens as it would on its own. What enters the context is paid for on every
   later step: numbers first (poses, CLIP, `timeline.py`), then one picture to confirm; no progress output or long
-  dumps. No `/compact`: a summary loses the exact seconds and the reasons.
+  dumps. No `/compact`: a summary loses the exact seconds and the reasons. When a result is accepted and what
+  is left is mechanical (a final, a port of a one-off script), write `out/<job>/handoff.md` (what is accepted with
+  its exact commands and files, what runs, what to do next, what the owner rejected) and say so: the next session
+  starts from that file instead of this history (`SESSIONS.md`).
 - Finding a moment in the footage (a dance, the jumps, a calm ending with them in view) is a measurement, not a
   viewing: first the feature that describes the moment, then the script that reads it (most often one exists:
   activities and captions in words, the timeline's columns, sounds, the owner's exports, close passes), and only
