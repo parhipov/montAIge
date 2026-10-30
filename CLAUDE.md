@@ -12,7 +12,8 @@ the early jobs with the owner's comments (later ones stay local, `out/<job>/exam
 embedia/                    the index: footage -> proxies, features, embedia.sqlite; knows nothing of editing,
                             used by other projects too (embedia/README.md)
 montaige/                   the montage: music, edits, QC, finals, from an index (python -m montaige JOB.toml)
-tools/                      standalone utilities: lut_clips.py (whole clips graded, no edit), trimtest.py,
+tools/                      standalone utilities: lut_clips.py (whole clips graded, no edit), trimtest.py, picture.py
+                            (a look, a light on people, varying motion blur over a finished edit), regrade.py,
                             flow_gyro.py (a Gyroflow project for a camera with no gyro, from the picture)
 docs/notes.md               methods, measurements, ideas not done yet
 docs/examples/<job>.md      early jobs: footage, task, edits, comments, what it taught (new ones: out/<job>/)
@@ -301,6 +302,16 @@ tables and columns; embedia/README.md says what they mean), `sql`, `search TEXT
   motion a frame -> `CLIP.gyroflow` beside the clip (open it in Gyroflow; the orientation of every frame inside,
   taken as it is), `.gcsv`, a pinhole `_lens.json`; `--check RENDER --from S`: the shake a render has left. Not in
   the pipeline.
+- The picture of a finished edit, the scenes kept (an edit the owner liked; previews first, then the same on the
+  final): `tools/regrade.py EDL REF_CLIP OUT.mp4 [--keep-wb]` (the cameras matched, every shot's levels; `--keep-wb`:
+  no white balance, the footage's own cast kept), `tools/make_lut.py OUT.cube` (a blue-red film LUT),
+  `tools/people_boxes.py PREVIEW.mp4 OUT.npz` (YOLO people a frame), `tools/picture.py IN.mp4 EDL OUT.mp4`:
+  `--look kino --lut FILE.cube --people BOXES.npz --wide 3 --gentle --lut-mix 1` (the LUT, a soft light round
+  people, tracked so it does not blink), motion blur from the picture's flow (`streak()` of
+  https://github.com/parhipov/SharpFrame, cloned beside the repository or in `SHARPFRAME`)
+  that varies: `--blur 0.5` (the shutter in frame intervals) `--blur-hits 2.5` (on musical hits) `--blur-speed 2`
+  (by speed) `--blur-dive 4.5` (in dives), the largest wins; a final: `--ffmpeg FFMPEG --people-width 640`,
+  `--range FROM-TO` to try a few seconds first.
 
 ## After a job
 

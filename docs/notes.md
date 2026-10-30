@@ -651,6 +651,20 @@ features, and a raised version makes them again.
   (where the grade's levels go), fitted to the reference's quantiles 10-90 and taken at half (gamma 1.14-1.26),
   each pixel scaled whole (the same curve on R, G, B reddened the moose): p5 10-12, median 36-38, no more blocks
   than the colour alone. A cheap camera's 8-bit footage takes a gentle curve only.
+- **Blue snow, a cast the owner liked** (two GoPros, WB locked at 5000K, December dusk; Lab b −10..−13 on the snow):
+  the match + grade and then the snow made white were "overdone: the bluish was cool, the contrast of the blue and
+  the red". Matched to the bluest clip, the grade's WB (80 %, each channel within 0.85-1.2) left the snow cyan
+  (a −10); levels by luma pushed the snow's blue channel to 255 while green rose on, cyan again (a −4 → −10). Kept:
+  the match, levels with the white point from the brightest channel (p99.5 of max(R, G, B)), no WB (`tools/
+  regrade.py --keep-wb`): b −10..−14 as shot, blacks 1-8 instead of 12-33.
+- **Shadows on people:** a lift by the surrounding luma on the whole frame opened the forest too; a light on people
+  only (YOLO boxes) blinked where the detector lost them (129 jumps over 0.3 a frame in 83 s): tracked boxes, gaps
+  of up to 15 frames filled, 6-frame fades: 5 jumps, all at cuts. An ellipse 1.3x the person at full strength read
+  as "pulling the curves"; liked: x0.5 in an ellipse 3x the person (at least 1/4 of the frame), feathered.
+- **Motion blur** from the picture (DIS flow within a shot, SharpFrame's `streak()`; `tools/picture.py`): a fixed
+  180-degree shutter was fine, a varying one "just top": 0.5 frame, up to 2.5 on musical hits (0.08 s in, ~0.25 s
+  out), up to 2 by speed (p90 motion 5 -> 18 px a frame at 640 wide), up to 4.5 in a dive. FPV moves fast nearly
+  always: the speed rule kept the shutter over a frame in 71 % of the frames (median 1.59).
 
 ## Finals
 
