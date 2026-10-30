@@ -33,8 +33,7 @@ Not in the middle of tuning: while the owner comments preview after preview, the
    ```
 
    The new session reads that file, then only what a step needs (a function's range, not a whole script).
-4. On another machine: `/save-project` before leaving, `/load-project` there; the job folder and its handoff
-   travel with `out/` (or are copied).
+4. On another machine: the handoff travels with the job folder (`out/<job>/`, copied there).
 
 ## What the handoff is not
 
